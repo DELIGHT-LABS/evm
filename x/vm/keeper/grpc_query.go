@@ -95,7 +95,7 @@ func (k Keeper) CosmosAccount(c context.Context, req *types.QueryCosmosAccountRe
 
 	account := k.accountKeeper.GetAccount(ctx, cosmosAddr)
 	res := types.QueryCosmosAccountResponse{
-		CosmosAddress: cosmosAddr.String(),
+		CosmosAddress: account.GetAddress().String(),
 	}
 
 	if account != nil {
