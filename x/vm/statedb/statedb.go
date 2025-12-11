@@ -213,6 +213,7 @@ func (s *StateDB) cache() error {
 		eventsToEmit := s.cacheCtx.EventManager().Events()
 		s.ctx.EventManager().EmitEvents(eventsToEmit)
 		s.cacheCtx.MultiStore().(storetypes.CacheMultiStore).Write()
+		s.snapshotter.Commit()
 	}
 
 	return nil

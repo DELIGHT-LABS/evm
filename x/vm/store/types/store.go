@@ -15,6 +15,10 @@ type Snapshotter interface {
 	// RevertToSnapshot rolls back the state to the snapshot corresponding
 	// to the given identifier. All changes made after that snapshot will be discarded.
 	RevertToSnapshot(int)
+
+	// Commit flushes all pending changes in the current store layer
+	// down to its parent, making them permanent.
+	Commit()
 }
 
 // SnapshotKVStore extends Snapshotter with CacheKVStore-specific operations.
