@@ -141,7 +141,13 @@ func (s *Store) LatestVersion() int64 {
 }
 
 // Write calls Write on each underlying store.
-func (s *Store) Write() {
+// NOTE: Write is no-op function.
+// Because for evm's record, the snapshot should not be committed before the final moment.
+func (s *Store) Write() {}
+
+// Commit commits all the cached stores from top to bottom in order
+// and clears the cache stack by setting an empty slice of cache store.
+func (s *Store) Commit() {
 	for _, key := range s.storeKeys {
 		s.stores[key].Commit()
 	}
