@@ -32,9 +32,8 @@ type SnapshotKVStore interface {
 	// active (i.e., where reads and writes will be applied).
 	CurrentStore() storetypes.CacheKVStore
 
-	// Commit flushes all pending changes in the current store layer
-	// down to its parent, making them permanent.
-	Commit()
+	// Flush flushes all pending changes in the current store layer
+	Flush()
 }
 
 // SnapshotMultiStore extends Snapshotter and CacheMultiStore.

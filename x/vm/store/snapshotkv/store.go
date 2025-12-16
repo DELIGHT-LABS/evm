@@ -42,12 +42,16 @@ func (cs *Store) CurrentStore() storetypes.CacheKVStore {
 // Commit commits all the cached stores from top to bottom in order
 // and clears the cache stack by setting an empty slice of cache store.
 func (cs *Store) Commit() {
-	// commit in order from top to bottom
+	cs.Flush()
+	cs.cacheStores = nil
+}
+
+// Flush flushes all pending changes in the current store layer
+func (cs *Store) Flush() {
 	for i := len(cs.cacheStores) - 1; i >= 0; i-- {
 		cs.cacheStores[i].Write()
 	}
 	cs.initialStore.Write()
-	cs.cacheStores = nil
 }
 
 // Snapshot pushes a new cached store to the stack,

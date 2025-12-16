@@ -34,7 +34,7 @@ func TestSnapshotMultiIndexing(t *testing.T) {
 	require.Equal(t, 2, idx2)
 }
 
-func TestSnapshotMultiRevertAndCommit(t *testing.T) {
+func TestSnapshotMultiRevertAndWrite(t *testing.T) {
 	snapshotStore, key := setupStore()
 	kv := snapshotStore.GetKVStore(key)
 	kv.Set([]byte("a"), []byte("1"))
@@ -55,11 +55,17 @@ func TestSnapshotMultiRevertAndCommit(t *testing.T) {
 
 	snapshotStore.Snapshot()
 	snapshotStore.GetKVStore(key).Set([]byte("d"), []byte("4"))
-	snapshotStore.Commit()
+	snapshotStore.Write()
 
 	require.Equal(t, []byte("4"), kv.Get([]byte("d")))
 	idx := snapshotStore.Snapshot()
+	require.Equal(t, 1, idx)
+
+	snapshotStore.Commit()
+	require.Equal(t, []byte("4"), kv.Get([]byte("d")))
+	idx = snapshotStore.Snapshot()
 	require.Equal(t, 0, idx)
+
 }
 
 func TestSnapshotMultiRevertOverwriteSameKey(t *testing.T) {
