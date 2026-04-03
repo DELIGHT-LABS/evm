@@ -276,6 +276,7 @@ func (k *Keeper) applyTransactionWithoutHooks(
 		tmpCtx, commitFn = ctx.CacheContext()
 	}
 
+<<<<<<< HEAD
 	// Persist tx-wide trace into the currently active cache context so that
 	// PostTxProcessing can read it, and so the failed-tx path (tmpCtx reset)
 	// writes into the correct object store.
@@ -283,6 +284,52 @@ func (k *Keeper) applyTransactionWithoutHooks(
 	// If there are no hooks, we can commit the state immediately if the tx is successful
 	if commitFn != nil && !res.Failed() {
 		commitFn()
+=======
+	signerAddr, err := signer.Sender(tx)
+	if err != nil {
+		return nil, errorsmod.Wrap(err, "failed to extract sender address from ethereum transaction")
+	}
+
+	// Only call PostTxProcessing if there are hooks set, to avoid calling commitFn unnecessarily
+	if !k.HasHooks() {
+		// If there are no hooks, we can commit the state immediately if the tx is successful
+		if commitFn != nil && !res.Failed() {
+			commitFn()
+		}
+	} else {
+		// Note: PostTxProcessing hooks currently do not charge for gas
+		// and function similar to EndBlockers in abci, but for EVM transactions.
+		// It will persist data even if the tx fails.
+		err = k.PostTxProcessing(tmpCtx, signerAddr, *msg, receipt)
+		if err != nil {
+			// If hooks returns an error, revert the whole tx.
+			if rdp, ok := err.(types.RevertError); ok {
+				res.VmError = vm.ErrExecutionReverted.Error()
+				res.Ret = rdp.RevertData()
+			} else {
+				res.VmError = errorsmod.Wrap(err, "failed to execute post transaction processing").Error()
+			}
+			k.Logger(ctx).Error("tx post processing failed", "error", err)
+			// If the tx failed in post processing hooks, we should clear all log-related data
+			// to match EVM behavior where transaction reverts clear all effects including logs
+			res.Logs = nil
+			receipt.Logs = nil
+			receipt.Bloom = ethtypes.Bloom{} // Clear bloom filter
+		} else {
+			if commitFn != nil {
+				commitFn()
+			}
+
+			// Since the post-processing can alter the log, we need to update the result
+			if res.Failed() {
+				res.Logs = nil
+				receipt.Logs = nil
+				receipt.Bloom = ethtypes.Bloom{}
+			} else {
+				res.Logs = types.NewLogsFromEth(receipt.Logs)
+			}
+		}
+>>>>>>> 9a62a35 (refactor: use solidity error)
 	}
 
 	// refund gas to match the Ethereum gas consumption instead of the default SDK one.
