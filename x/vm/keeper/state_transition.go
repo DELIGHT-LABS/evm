@@ -231,9 +231,16 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (_ 
 	// thus restricted to be used only inside `ApplyMessage`.
 	tmpCtx, commitFn := ctx.CacheContext()
 
+	// tx-wide trace collection (non-consensus; best-effort)
+	collector := newTxTraceCollector()
+	var innerTracer *tracing.Hooks
+	if k.tracer != "" {
+		innerTracer = k.Tracer(tmpCtx, *msg, types.GetEthChainConfig())
+	}
+	wrappedTracer := newTxTraceHooks(innerTracer, collector)
 	// pass true to commit the StateDB
 	stateDB := statedb.New(tmpCtx, k, txConfig)
-	res, err := k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, nil, true, false, cfg, txConfig, false, nil)
+	res, err := k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, wrappedTracer, true, false, cfg, txConfig, false, nil)
 	if err != nil {
 		// when a transaction contains multiple msg, as long as one of the msg fails
 		// all gas will be deducted. so is not msg.Gas()
@@ -274,6 +281,11 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (_ 
 	} else {
 		receipt.Status = ethtypes.ReceiptStatusSuccessful
 	}
+
+	// Persist tx-wide trace into the currently active cache context so that
+	// PostTxProcessing can read it, and so the failed-tx path (tmpCtx reset)
+	// writes into the correct object store.
+	persistTxTraceObject(tmpCtx, k.objectKey, uint64(txConfig.TxIndex), collector)
 
 	signerAddr, err := signer.Sender(tx)
 	if err != nil {
