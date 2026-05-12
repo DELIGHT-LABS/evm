@@ -36,6 +36,8 @@ const (
 const (
 	prefixObjectBloom = iota + 1
 	prefixObjectGasUsed
+	prefixObjectTxCallTouches
+	prefixObjectTxValueTransfers
 )
 
 // KVStore key prefixes
@@ -51,6 +53,9 @@ var (
 var (
 	KeyPrefixObjectBloom   = []byte{prefixObjectBloom}
 	KeyPrefixObjectGasUsed = []byte{prefixObjectGasUsed}
+	// Tx-wide trace data keyed by txIndex (within a block).
+	KeyPrefixObjectTxCallTouches    = []byte{prefixObjectTxCallTouches}
+	KeyPrefixObjectTxValueTransfers = []byte{prefixObjectTxValueTransfers}
 )
 
 // AddressStoragePrefix returns a prefix to iterate over a given account storage.
