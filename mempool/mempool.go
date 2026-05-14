@@ -498,6 +498,13 @@ func (m *ExperimentalEVMMempool) defaultBroadcastTxFn(txs []*ethtypes.Transactio
 // This function wraps EVM transactions in MsgEthereumTx messages and submits them to the network
 // using the provided client context. It handles encoding and error reporting for each transaction.
 func broadcastEVMTransactions(clientCtx client.Context, ethTxs []*ethtypes.Transaction) error {
+	if clientCtx.TxConfig == nil {
+		return fmt.Errorf("evm mempool client context is missing tx config")
+	}
+	if clientCtx.Client == nil {
+		return fmt.Errorf("evm mempool client context is missing comet rpc client")
+	}
+
 	for _, ethTx := range ethTxs {
 		msg := &evmtypes.MsgEthereumTx{}
 		ethSigner := ethtypes.LatestSigner(evmtypes.GetEthChainConfig())

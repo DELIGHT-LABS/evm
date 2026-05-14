@@ -447,20 +447,20 @@ func startInProcess(svrCtx *server.Context, clientCtx client.Context, opts Start
 		}()
 	}
 
-	// Add the tx service to the gRPC router. We only need to register this
-	// service if API or gRPC or JSONRPC is enabled, and avoid doing so in the general
-	// case, because it spawns a new local CometBFT RPC client.
-	if (config.API.Enable || config.GRPC.Enable || config.JSONRPC.Enable || config.JSONRPC.EnableIndexer) && bftNode != nil {
+	if bftNode != nil {
 		clientCtx = clientCtx.WithClient(local.New(bftNode))
 
-		app.RegisterTxService(clientCtx)
-		app.RegisterTendermintService(clientCtx)
-		app.RegisterNodeService(clientCtx, config.Config)
-
-		// Set the clientCtx into the mempool
 		if m, ok := evmApp.GetMempool().(*evmmempool.ExperimentalEVMMempool); ok && m != nil {
 			m.SetClientCtx(clientCtx)
 		}
+	}
+
+	// Add the tx service to the gRPC router. We only need to register this
+	// service if API or gRPC or JSONRPC is enabled.
+	if (config.API.Enable || config.GRPC.Enable || config.JSONRPC.Enable || config.JSONRPC.EnableIndexer) && bftNode != nil {
+		app.RegisterTxService(clientCtx)
+		app.RegisterTendermintService(clientCtx)
+		app.RegisterNodeService(clientCtx, config.Config)
 	}
 
 	metrics, err := startTelemetry(config)
