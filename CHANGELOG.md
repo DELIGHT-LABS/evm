@@ -6,6 +6,7 @@
 
 ### API-BREAKING
 
+<<<<<<< HEAD
 ### IMPROVEMENTS
 
 ### FEATURES
@@ -34,6 +35,10 @@ Follow the [migration document](docs/migrations/v0.6.x_to_v0.7.0.md) for upgrade
 
 ### API-BREAKING
 - [\#1146](https://github.com/cosmos/evm/pull/1146) Remove `EndBlocker` based mempool updates, use `PrepareCheckStater` instead. 
+=======
+- [\#1146](https://github.com/cosmos/evm/pull/1146) Remove `EndBlocker` based mempool updates, use `PrepareCheckStater` instead.
+- [\#1099](https://github.com/cosmos/evm/pull/1099) Precompile reverts now use Solidity custom errors instead of `Error(string)` revert data.
+>>>>>>> 777f974 (chore: update CHANGELOG and add Precompile ABI Check workflow)
 
 ### IMPROVEMENTS
 
