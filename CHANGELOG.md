@@ -8,6 +8,7 @@
 ### FEATURES
 - [\#1181](https://github.com/cosmos/evm/pull/1181) Support state overrides in `debug_traceCall`.
 ### BUG FIXES
+- [\#1220](https://github.com/cosmos/evm/pull/1220) Use latest block for setting txn defaults in rpc call.
 
 ## v0.7.0
 
