@@ -1,0 +1,80 @@
+name: DELIGHT / Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main-delight
+      - main-xpla
+      - main-maroo
+      - "release/v0.*.x-delight"
+      - "release/v0.*.x-xpla"
+      - "release/v0.*.x-maroo"
+  merge_group:
+  push:
+    branches:
+      - main-delight
+      - main-xpla
+      - main-maroo
+      - "release/v0.*.x-delight"
+      - "release/v0.*.x-xpla"
+      - "release/v0.*.x-maroo"
+    paths:
+      - ".github/workflows/delight-test.yml"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "evmd/go.mod"
+      - "evmd/go.sum"
+      - "scripts/**"
+      - "Makefile"
+
+concurrency:
+  group: delight-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            evmd/go.sum
+
+      - name: Test and create coverage report
+        run: make test-unit-cover
+
+  scripts:
+    name: Scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+
+      - name: Test scripts
+        run: make test-scripts

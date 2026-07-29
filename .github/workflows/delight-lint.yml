@@ -1,0 +1,62 @@
+name: DELIGHT / Lint
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main-delight
+      - main-xpla
+      - main-maroo
+      - "release/v0.*.x-delight"
+      - "release/v0.*.x-xpla"
+      - "release/v0.*.x-maroo"
+  merge_group:
+
+concurrency:
+  group: delight-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  golangci:
+    name: Go
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            evmd/go.sum
+
+      - name: Run Go linting
+        run: make lint-go
+
+  markdown:
+    name: Markdown
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: "**/*.md"
+          config: .markdownlint.yml
+          fix: false
