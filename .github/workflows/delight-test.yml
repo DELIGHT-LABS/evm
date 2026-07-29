@@ -55,8 +55,8 @@ jobs:
             go.sum
             evmd/go.sum
 
-      - name: Test and create coverage report
-        run: make test-unit-cover
+      - name: Test Go modules
+        run: make test-all
 
   scripts:
     name: Scripts
