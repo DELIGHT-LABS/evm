@@ -81,22 +81,22 @@ jobs:
             packages: ./tests/integration
             args: >-
               -v
-              -run=^(TestKeeperTestSuite|TestNestedEVMExtensionCallSuite|TestGenesisTestSuite|TestVmAnteTestSuite|TestIterateContracts)$
+              -run='^(TestKeeperTestSuite|TestNestedEVMExtensionCallSuite|TestGenesisTestSuite|TestVmAnteTestSuite|TestIterateContracts)'
           - suite: integration-erc20
             packages: ./tests/integration
             args: >-
               -v
-              -run=^(TestERC20GenesisTestSuite|TestERC20KeeperTestSuite|TestERC20PrecompileIntegrationTestSuite)$
+              -run='^(TestERC20GenesisTestSuite|TestERC20KeeperTestSuite|TestERC20PrecompileIntegrationTestSuite)'
           - suite: integration-ibc
             packages: ./tests/integration
             args: >-
               -v
-              -run=^(TestIBCKeeperTestSuite|TestIBCCallback)$
+              -run='^(TestIBCKeeperTestSuite|TestIBCCallback)'
           - suite: integration-other
             packages: ./tests/integration
             args: >-
               -v
-              -run=^(TestBackend|TestEIP712TestSuite|TestKVIndexer|TestLedgerTestSuite|TestFeeMarketKeeperTestSuite)$
+              -run='^(TestBackend|TestEIP712TestSuite|TestKVIndexer|TestLedgerTestSuite|TestFeeMarketKeeperTestSuite)'
           - suite: integration-ante
             packages: ./tests/integration/ante
             args: ""
@@ -133,7 +133,7 @@ jobs:
         run: >-
           make test-evmd
           PACKAGES_EVMD='${{ matrix.packages }}'
-          EXTRA_ARGS='${{ matrix.args }}'
+          EXTRA_ARGS="${{ matrix.args }}"
 
   scripts:
     name: Scripts
