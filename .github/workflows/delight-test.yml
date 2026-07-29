@@ -57,9 +57,33 @@ jobs:
         run: make test-unit
 
   evmd:
-    name: evmd
+    name: evmd / ${{ matrix.suite }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: core
+            packages: >-
+              .
+              ./cmd/...
+              ./config
+              ./testutil
+              ./tests/ledger/...
+              ./tests/network
+          - suite: ibc
+            packages: ./tests/ibc
+          - suite: integration
+            packages: >-
+              ./tests/integration
+              ./tests/integration/ante
+              ./tests/integration/balance_handler
+              ./tests/integration/eip7702
+              ./tests/integration/eips
+              ./tests/integration/mempool
+          - suite: precompiles
+            packages: ./tests/integration/precompiles/...
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -75,7 +99,7 @@ jobs:
             evmd/go.sum
 
       - name: Test evmd module
-        run: make test-evmd
+        run: make test-evmd PACKAGES_EVMD='${{ matrix.packages }}'
 
   scripts:
     name: Scripts
