@@ -73,22 +73,48 @@ jobs:
               ./testutil
               ./tests/ledger/...
               ./tests/network
+            args: ""
           - suite: ibc
             packages: ./tests/ibc
-          - suite: integration
+            args: ""
+          - suite: integration-vm
             packages: ./tests/integration
+            args: >-
+              -v
+              -run=^(TestKeeperTestSuite|TestNestedEVMExtensionCallSuite|TestGenesisTestSuite|TestVmAnteTestSuite|TestIterateContracts)$
+          - suite: integration-erc20
+            packages: ./tests/integration
+            args: >-
+              -v
+              -run=^(TestERC20GenesisTestSuite|TestERC20KeeperTestSuite|TestERC20PrecompileIntegrationTestSuite)$
+          - suite: integration-ibc
+            packages: ./tests/integration
+            args: >-
+              -v
+              -run=^(TestIBCKeeperTestSuite|TestIBCCallback)$
+          - suite: integration-other
+            packages: ./tests/integration
+            args: >-
+              -v
+              -run=^(TestBackend|TestEIP712TestSuite|TestKVIndexer|TestLedgerTestSuite|TestFeeMarketKeeperTestSuite)$
           - suite: integration-ante
             packages: ./tests/integration/ante
+            args: ""
           - suite: integration-balance-handler
             packages: ./tests/integration/balance_handler
+            args: ""
           - suite: integration-eip7702
             packages: ./tests/integration/eip7702
+            args: ""
           - suite: integration-eips
             packages: ./tests/integration/eips
+            args: ""
           - suite: integration-mempool
             packages: ./tests/integration/mempool
+            args: ""
           - suite: precompiles
             packages: ./tests/integration/precompiles/...
+            args: ""
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -104,7 +130,10 @@ jobs:
             evmd/go.sum
 
       - name: Test evmd module
-        run: make test-evmd PACKAGES_EVMD='${{ matrix.packages }}'
+        run: >-
+          make test-evmd
+          PACKAGES_EVMD='${{ matrix.packages }}'
+          EXTRA_ARGS='${{ matrix.args }}'
 
   scripts:
     name: Scripts
