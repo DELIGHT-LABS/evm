@@ -51,12 +51,31 @@ jobs:
           go-version-file: go.mod
           check-latest: true
           cache: true
+          cache-dependency-path: go.sum
+
+      - name: Test root module
+        run: make test-unit
+
+  evmd:
+    name: evmd
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
           cache-dependency-path: |
             go.sum
             evmd/go.sum
 
-      - name: Test Go modules
-        run: make test-all
+      - name: Test evmd module
+        run: make test-evmd
 
   scripts:
     name: Scripts
