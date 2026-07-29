@@ -80,6 +80,7 @@ sed -i 's/timeout_prevote = "1s"/timeout_prevote = "300ms"/g' "$CONFIG_TOML"
 sed -i 's/timeout_prevote_delta = "500ms"/timeout_prevote_delta = "100ms"/g' "$CONFIG_TOML"
 sed -i 's/timeout_precommit = "1s"/timeout_precommit = "300ms"/g' "$CONFIG_TOML"
 sed -i 's/timeout_precommit_delta = "500ms"/timeout_precommit_delta = "100ms"/g' "$CONFIG_TOML"
+sed -i 's/type = "flood"/type = "app"/g' "$CONFIG_TOML"
 
 echo "🚀 Starting evmd..."
 exec evmd start \
