@@ -1,53 +1,51 @@
 queue_rules:
-  - name: default
+  - name: downstream patches
     queue_conditions:
-      - "#approved-reviews-by>1"
-      - base=main
-      - label=automerge
+      - "#approved-reviews-by >= 1"
+      - "base ~= ^(main-(delight|xpla|maroo)|release/v0[.][0-9]+[.]x-(delight|xpla|maroo))$"
+      - "label = automerge"
+      - "-label = kind/upstream-sync"
     merge_conditions:
-      - "#approved-reviews-by>1"
+      - "#approved-reviews-by >= 1"
     merge_method: squash
     commit_message_format:
       title: pr-title
       body: pr-body
+
+  - name: upstream and layer sync
+    queue_conditions:
+      - "#approved-reviews-by >= 1"
+      - "base ~= ^(main-(delight|xpla|maroo)|release/v0[.][0-9]+[.]x-(delight|xpla|maroo))$"
+      - "label = automerge"
+      - "label = kind/upstream-sync"
+    merge_conditions:
+      - "#approved-reviews-by >= 1"
+    merge_method: merge
+    commit_message_format:
+      title: pr-title
+      body: pr-body
+
 pull_request_rules:
-  - name: backport patches to v0.3.x branch
+  - name: backport shared patches to v0.6.x
     conditions:
-      - base=main
-      - label=backport/0.3.x
+      - "base = main-delight"
+      - "label = backport/0.6.x"
+      - "-label = kind/upstream-sync"
     actions:
       backport:
         branches:
-          - release/v0.3.x
-  - name: backport patches to v0.4.x branch
+          - release/v0.6.x-delight
+        labels:
+          - automerge
+
+  - name: backport XPLA patches to v0.6.x
     conditions:
-      - base=main
-      - label=backport/0.4.x
+      - "base = main-xpla"
+      - "label = backport/0.6.x"
+      - "-label = kind/upstream-sync"
     actions:
       backport:
         branches:
-          - release/v0.4.x
-  - name: backport patches to v0.5.x branch
-    conditions:
-      - base=main
-      - label=backport/0.5.x
-    actions:
-      backport:
-        branches:
-          - release/v0.5.x
-  - name: backport patches to v0.6.x branch
-    conditions:
-      - base=main
-      - label=backport/0.6.x
-    actions:
-      backport:
-        branches:
-          - release/v0.6.x
-  - name: backport patches to v0.7.x branch
-    conditions:
-      - base=main
-      - label=backport/0.7.x
-    actions:
-      backport:
-        branches:
-          - release/v0.7.x
+          - release/v0.6.x-xpla
+        labels:
+          - automerge
