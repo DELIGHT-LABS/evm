@@ -1047,7 +1047,7 @@ func (s *KeeperTestSuite) TestSetBalance() {
 			},
 			false,
 			func() *uint256.Int {
-				return common.U2560.Add(totalBalance, amount)
+				return uint256.NewInt(0).Add(totalBalance, amount)
 			},
 		},
 		{
@@ -1307,8 +1307,8 @@ func (s *KeeperTestSuite) TestDeleteAccount() {
 
 func (s *KeeperTestSuite) TestSetBalanceRejectsModuleAccounts() {
 	type setup struct {
-		addr     common.Address
-		current  *uint256.Int
+		addr    common.Address
+		current *uint256.Int
 	}
 
 	cases := []struct {

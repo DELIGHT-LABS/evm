@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"time"
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/crypto/tmhash"
@@ -205,17 +204,16 @@ func (s *IntegrationTestSuite) notifyNewBlockToMempool() {
 	// Access the underlying blockchain interface from the EVM mempool
 	if evmMempoolCast, ok := evmMempool.(*evmmempool.ExperimentalEVMMempool); ok {
 		blockchain := evmMempoolCast.GetBlockchain()
+		txPool := evmMempoolCast.GetTxPool()
 
-		// Trigger a new block notification
-		// This sends a ChainHeadEvent that the mempool subscribes to.
-		// The TxPool's event loop receives this and calls Reset() for each subpool,
-		// which naturally removes committed transactions via demoteUnexecutables().
+		// Capture both heads and reset subpools synchronously so assertions do not
+		// race the asynchronous chain-head event loop.
+		oldHead := blockchain.CurrentBlock()
 		blockchain.NotifyNewBlock()
+		newHead := blockchain.CurrentBlock()
 
-		// The ChainHeadEvent is processed asynchronously, so we need to wait a bit
-		// for the event to be processed and the reset to complete.
-		// In integration tests, this might need a small delay to ensure the event
-		// is processed before we check the mempool state.
-		time.Sleep(100 * time.Millisecond)
+		for _, subpool := range txPool.Subpools {
+			subpool.Reset(oldHead, newHead)
+		}
 	}
 }
