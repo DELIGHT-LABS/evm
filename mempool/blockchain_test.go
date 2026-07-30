@@ -21,12 +21,18 @@ import (
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
 
+	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-// createMockContext creates a basic mock context for testing
+// createMockContext creates a basic mock context with a multistore so
+// CacheContext can isolate mempool state reads.
 func createMockContext() sdk.Context {
-	return sdk.Context{}.
+	storeKey := storetypes.NewKVStoreKey("test")
+	transientKey := storetypes.NewTransientStoreKey("transient_test")
+	ctx := testutil.DefaultContext(storeKey, transientKey)
+
+	return ctx.
 		WithBlockTime(time.Now()).
 		WithBlockHeader(cmtproto.Header{AppHash: []byte("00000000000000000000000000000000")}).
 		WithBlockHeight(1).

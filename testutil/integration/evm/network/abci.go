@@ -7,6 +7,8 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttypes "github.com/cometbft/cometbft/types"
 
+	evmmempool "github.com/cosmos/evm/mempool"
+
 	storetypes "cosmossdk.io/store/types"
 )
 
@@ -84,7 +86,16 @@ func (n *IntegrationNetwork) finalizeBlockAndCommit(duration time.Duration, txBy
 	newCtx = newCtx.WithHeaderHash(header.AppHash)
 	n.ctx = newCtx
 
-	// commit changes
+	// Acquire the test-only commit lock so race builds do not read IAVL state
+	// from the txpool reorg goroutine while the application is committing.
+	if mp := n.app.GetMempool(); mp != nil {
+		if evmMp, ok := mp.(*evmmempool.ExperimentalEVMMempool); ok {
+			if bc := evmMp.GetBlockchain(); bc != nil {
+				bc.BeginCommit()
+				defer bc.EndCommit()
+			}
+		}
+	}
 	_, err = n.app.Commit()
 
 	return res, err
