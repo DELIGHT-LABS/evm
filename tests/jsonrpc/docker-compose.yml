@@ -34,7 +34,7 @@ services:
 
   geth:
     container_name: geth-compat-test
-    image: "ethereum/client-go:latest"
+    image: "ethereum/client-go:v1.16.3"
     privileged: true
     ports:
       - "8547:8545"
