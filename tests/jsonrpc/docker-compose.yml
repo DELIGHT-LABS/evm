@@ -34,7 +34,7 @@ services:
 
   geth:
     container_name: geth-compat-test
-    image: "ethereum/client-go:latest"
+    image: "ethereum/client-go:v1.17.2"
     privileged: true
     ports:
       - "8547:8545"
@@ -55,7 +55,6 @@ services:
       --ws.port 8546
       --ws.api eth,net,web3,personal,admin,debug,miner,txpool
       --ws.origins "*"
-      --allow-insecure-unlock
       --rpc.allow-unprotected-txs
       --nodiscover
     healthcheck:

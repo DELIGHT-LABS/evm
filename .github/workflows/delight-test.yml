@@ -1,0 +1,157 @@
+name: DELIGHT / Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main-delight
+      - main-xpla
+      - main-maroo
+      - "release/v0.*.x-delight"
+      - "release/v0.*.x-xpla"
+      - "release/v0.*.x-maroo"
+  merge_group:
+  push:
+    branches:
+      - main-delight
+      - main-xpla
+      - main-maroo
+      - "release/v0.*.x-delight"
+      - "release/v0.*.x-xpla"
+      - "release/v0.*.x-maroo"
+    paths:
+      - ".github/workflows/delight-test.yml"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "evmd/go.mod"
+      - "evmd/go.sum"
+      - "scripts/**"
+      - "Makefile"
+
+concurrency:
+  group: delight-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Test root module
+        run: make test-unit
+
+  evmd:
+    name: evmd / ${{ matrix.suite }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - suite: core
+            packages: >-
+              .
+              ./cmd/...
+              ./config
+              ./testutil
+              ./tests/ledger/...
+              ./tests/network
+            args: ""
+          - suite: ibc
+            packages: ./tests/ibc
+            args: ""
+          - suite: integration-vm
+            packages: ./tests/integration
+            args: >-
+              -v
+              -run='^(TestKeeperTestSuite|TestNestedEVMExtensionCallSuite|TestGenesisTestSuite|TestVmAnteTestSuite|TestIterateContracts)'
+          - suite: integration-erc20
+            packages: ./tests/integration
+            args: >-
+              -v
+              -run='^(TestERC20GenesisTestSuite|TestERC20KeeperTestSuite|TestERC20PrecompileIntegrationTestSuite)'
+          - suite: integration-ibc
+            packages: ./tests/integration
+            args: >-
+              -v
+              -run='^(TestIBCKeeperTestSuite|TestIBCCallback)'
+          - suite: integration-other
+            packages: ./tests/integration
+            args: >-
+              -v
+              -run='^(TestBackend|TestEIP712TestSuite|TestKVIndexer|TestLedgerTestSuite|TestFeeMarketKeeperTestSuite)'
+          - suite: integration-ante
+            packages: ./tests/integration/ante
+            args: ""
+          - suite: integration-balance-handler
+            packages: ./tests/integration/balance_handler
+            args: ""
+          - suite: integration-eip7702
+            packages: ./tests/integration/eip7702
+            args: ""
+          - suite: integration-eips
+            packages: ./tests/integration/eips
+            args: ""
+          - suite: integration-mempool
+            packages: ./tests/integration/mempool
+            args: ""
+          - suite: precompiles
+            packages: ./tests/integration/precompiles/...
+            args: ""
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            evmd/go.sum
+
+      - name: Test evmd module
+        run: >-
+          make test-evmd
+          PACKAGES_EVMD='${{ matrix.packages }}'
+          EXTRA_ARGS="${{ matrix.args }}"
+
+  scripts:
+    name: Scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+
+      - name: Test scripts
+        run: make test-scripts
