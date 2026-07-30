@@ -61,7 +61,7 @@ func DecodeTxResponses(in []byte) ([]*MsgEthereumTxResponse, error) {
 	responses := make([]*MsgEthereumTxResponse, 0, len(txMsgData.MsgResponses))
 	for _, res := range txMsgData.MsgResponses {
 		var response MsgEthereumTxResponse
-		if !(res.TypeUrl == "/"+proto.MessageName(&response) || res.TypeUrl == "/ethermint.evm.v1.MsgEthereumTxResponse") {
+		if res.TypeUrl != "/"+proto.MessageName(&response) && res.TypeUrl != "/ethermint.evm.v1.MsgEthereumTxResponse" {
 			continue
 		}
 		err := proto.Unmarshal(res.Value, &response)
