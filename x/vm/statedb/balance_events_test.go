@@ -39,6 +39,8 @@ func (m *mockSnapshotter) RevertToSnapshot(snapshot int) {
 	}
 }
 
+func (m *mockSnapshotter) Commit() {}
+
 // TestRevertToSnapshot_ProcessedEventsInvariant verifies the invariant:
 // "After any revert, processedEventsCount <= current event count"
 // This tests cacheCtx event manager behavior during EVM execution with precompile calls and reverts.
