@@ -25,6 +25,8 @@ import (
 var (
 	errInvalidBlockRange      = errors.New("invalid block range params")
 	errPendingLogsUnsupported = errors.New("pending logs are not supported")
+	errGetLogsDisabled        = errors.New("eth_getLogs is disabled")
+	errGetFilterLogsDisabled  = errors.New("eth_getFilterLogs is disabled")
 )
 
 // FilterAPI gathers
@@ -218,40 +220,11 @@ func (api *PublicFilterAPI) NewFilter(criteria filters.FilterCriteria) (rpc.ID, 
 	return id, nil
 }
 
-// GetLogs returns logs matching the given argument that are stored within the state.
+// GetLogs is disabled to prevent expensive historical log queries.
 //
 // https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getlogs
-func (api *PublicFilterAPI) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*ethtypes.Log, error) {
-	var filter *Filter
-	if crit.BlockHash != nil {
-		// Block filter requested, construct a single-shot filter
-		filter = NewBlockFilter(api.logger, api.backend, crit)
-	} else {
-		// Convert the RPC block numbers into internal representations
-		begin := rpc.LatestBlockNumber.Int64()
-		if crit.FromBlock != nil {
-			begin = crit.FromBlock.Int64()
-		}
-		end := rpc.LatestBlockNumber.Int64()
-		if crit.ToBlock != nil {
-			end = crit.ToBlock.Int64()
-		}
-		// Block numbers below 0 are special cases.
-		// for more info, https://github.com/ethereum/go-ethereum/blob/v1.15.11/eth/filters/api.go#L360
-		if begin > 0 && end > 0 && begin > end {
-			return nil, errInvalidBlockRange
-		}
-		// Construct the range filter
-		filter = NewRangeFilter(api.logger, api.backend, begin, end, crit.Addresses, crit.Topics)
-	}
-
-	// Run the filter and return all the logs
-	logs, err := filter.Logs(ctx, int(api.backend.RPCLogsCap()), int64(api.backend.RPCBlockRangeCap()))
-	if err != nil {
-		return nil, err
-	}
-
-	return returnLogs(logs), err
+func (api *PublicFilterAPI) GetLogs(_ context.Context, _ filters.FilterCriteria) ([]*ethtypes.Log, error) {
+	return nil, errGetLogsDisabled
 }
 
 // UninstallFilter removes the filter with the given filter id.
@@ -268,46 +241,11 @@ func (api *PublicFilterAPI) UninstallFilter(id rpc.ID) bool {
 	return found
 }
 
-// GetFilterLogs returns the logs for the filter with the given id.
-// If the filter could not be found an empty array of logs is returned.
+// GetFilterLogs is disabled to prevent expensive historical log queries.
 //
 // https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getfilterlogs
-func (api *PublicFilterAPI) GetFilterLogs(ctx context.Context, id rpc.ID) ([]*ethtypes.Log, error) {
-	api.filtersMu.Lock()
-	f, found := api.filters[id]
-	api.filtersMu.Unlock()
-
-	if !found {
-		return returnLogs(nil), fmt.Errorf("filter %s not found", id)
-	}
-
-	if f.typ != filters.LogsSubscription {
-		return returnLogs(nil), fmt.Errorf("filter %s doesn't have a LogsSubscription type: got %d", id, f.typ)
-	}
-
-	var filter *Filter
-	if f.crit.BlockHash != nil {
-		// Block filter requested, construct a single-shot filter
-		filter = NewBlockFilter(api.logger, api.backend, f.crit)
-	} else {
-		// Convert the RPC block numbers into internal representations
-		begin := rpc.LatestBlockNumber.Int64()
-		if f.crit.FromBlock != nil {
-			begin = f.crit.FromBlock.Int64()
-		}
-		end := rpc.LatestBlockNumber.Int64()
-		if f.crit.ToBlock != nil {
-			end = f.crit.ToBlock.Int64()
-		}
-		// Construct the range filter
-		filter = NewRangeFilter(api.logger, api.backend, begin, end, f.crit.Addresses, f.crit.Topics)
-	}
-	// Run the filter and return all the logs
-	logs, err := filter.Logs(ctx, int(api.backend.RPCLogsCap()), int64(api.backend.RPCBlockRangeCap()))
-	if err != nil {
-		return nil, err
-	}
-	return returnLogs(logs), nil
+func (api *PublicFilterAPI) GetFilterLogs(_ context.Context, _ rpc.ID) ([]*ethtypes.Log, error) {
+	return nil, errGetFilterLogsDisabled
 }
 
 // GetFilterChanges returns the logs for the filter with the given id since

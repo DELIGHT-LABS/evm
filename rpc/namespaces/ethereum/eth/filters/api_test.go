@@ -1,6 +1,7 @@
 package filters
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -9,6 +10,26 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetLogsDisabled(t *testing.T) {
+	api := &PublicFilterAPI{}
+
+	logs, err := api.GetLogs(context.Background(), filters.FilterCriteria{})
+
+	require.Nil(t, logs)
+	require.ErrorIs(t, err, errGetLogsDisabled)
+	require.EqualError(t, err, "eth_getLogs is disabled")
+}
+
+func TestGetFilterLogsDisabled(t *testing.T) {
+	api := &PublicFilterAPI{}
+
+	logs, err := api.GetFilterLogs(context.Background(), rpc.ID("0x1"))
+
+	require.Nil(t, logs)
+	require.ErrorIs(t, err, errGetFilterLogsDisabled)
+	require.EqualError(t, err, "eth_getFilterLogs is disabled")
+}
 
 func TestTimeoutLoop_PanicOnNilCancel(t *testing.T) {
 	api := &PublicFilterAPI{
