@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## UNRELEASED
+### IMPROVEMENTS
+- [\#1238](https://github.com/cosmos/evm/pull/1238) Validate ICS-20 acknowledgement encoding in the erc20 IBC v2 middleware.
+
+### BUG FIXES
+- [\#732](https://github.com/cosmos/evm/pull/732) Fix mempool state-read races in integration tests.
+- [\#1243](https://github.com/cosmos/evm/pull/1243) Deploy contracts from an EOA rather than a module account in test helpers.
+
 ## v0.6.0
 
 Follow the [migration document](docs/migrations/v0.5.x_to_v0.6.0.md) for upgrade instructions.

@@ -65,7 +65,6 @@ func TestSnapshotMultiRevertAndWrite(t *testing.T) {
 	require.Equal(t, []byte("4"), kv.Get([]byte("d")))
 	idx = snapshotStore.Snapshot()
 	require.Equal(t, 0, idx)
-
 }
 
 func TestSnapshotMultiRevertOverwriteSameKey(t *testing.T) {
