@@ -29,7 +29,7 @@ pull_request_rules:
   - name: sync merged main-delight PRs to chain branches
     conditions:
       - "base = main-delight"
-      - "merged = true"
+      - merged
     actions:
       backport:
         branches:
