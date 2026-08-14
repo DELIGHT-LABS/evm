@@ -2,6 +2,8 @@ name: Solhint
 # This workflow is only run when a .sol file has been changed
 on:
   pull_request:
+    paths-ignore:
+      - ".mergify.yml"
 
 permissions: read-all
 
