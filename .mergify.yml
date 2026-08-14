@@ -26,6 +26,36 @@ queue_rules:
       body: pr-body
 
 pull_request_rules:
+<<<<<<< HEAD
+=======
+  - name: queue approved automerge PRs
+    conditions:
+      - "#approved-reviews-by >= 1"
+      - "base ~= ^(main-(delight|xpla|maroo)|release/v0[.][0-9]+[.]x-(delight|xpla|maroo))$"
+      - "label = automerge"
+    actions:
+      queue:
+
+  - name: sync merged main-delight PRs to chain branches
+    conditions:
+      - "base = main-delight"
+      - merged
+    actions:
+      backport:
+        branches:
+          - main-xpla
+          - main-maroo
+        labels:
+          - kind/upstream-sync
+        title: "{{ title }} (sync #{{ number }} to {{ destination_branch }})"
+        body: |
+          {{ body }}
+
+          Automatic sync of #{{ number }} from `main-delight` by Mergify.
+
+          {{ cherry_picked_commits }}
+
+>>>>>>> f46691c (fix: queue approved automerge PRs (#10))
   - name: backport shared patches to v0.6.x
     conditions:
       - "base = main-delight"
