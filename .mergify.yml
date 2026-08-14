@@ -59,7 +59,6 @@ pull_request_rules:
     conditions:
       - "base = main-xpla"
       - "label = backport/0.6.x"
-      - "-label = kind/upstream-sync"
     actions:
       backport:
         branches:
@@ -71,7 +70,6 @@ pull_request_rules:
     conditions:
       - "base = main-xpla"
       - "label = backport/0.7.x"
-      - "-label = kind/upstream-sync"
     actions:
       backport:
         branches:
@@ -83,7 +81,6 @@ pull_request_rules:
     conditions:
       - "base = main-maroo"
       - "label = backport/0.7.x"
-      - "-label = kind/upstream-sync"
     actions:
       backport:
         branches:
