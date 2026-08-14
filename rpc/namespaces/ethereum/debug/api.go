@@ -142,7 +142,11 @@ func (a *API) TraceBlock(tblockRlp hexutil.Bytes, config *rpctypes.TraceConfig) 
 // TraceCall lets you trace a given eth_call. It collects the structured logs
 // created during the execution of EVM if the given transaction was added on
 // top of the provided block and returns them as a JSON object.
+<<<<<<< HEAD
 func (a *API) TraceCall(args evmtypes.TransactionArgs, blockNrOrHash rpctypes.BlockNumberOrHash, config *rpctypes.TraceConfig) (interface{}, error) {
+=======
+func (a *API) TraceCall(ctx context.Context, args evmtypes.TransactionArgs, blockNrOrHash rpctypes.BlockNumberOrHash, config *rpctypes.TraceCallConfig) (interface{}, error) {
+>>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
 	a.logger.Debug("debug_traceCall", "args", args, "block number or hash", blockNrOrHash)
 	return a.backend.TraceCall(args, blockNrOrHash, config)
 }

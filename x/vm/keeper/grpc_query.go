@@ -481,6 +481,14 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 	return &types.EstimateGasResponse{Gas: hi}, nil
 }
 
+type traceTxConfig struct {
+	evmConfig      *statedb.EVMConfig
+	txConfig       statedb.TxConfig
+	traceConfig    *types.TraceConfig
+	commit         bool
+	stateOverrides *rpctypes.StateOverride
+}
+
 // TraceTx configures a new tracer according to the provided configuration, and
 // executes the given message in the provided environment. The return value will
 // be tracer-dependent.
@@ -571,7 +579,15 @@ func (k Keeper) TraceTx(c context.Context, req *types.QueryTraceTxRequest) (*typ
 		txConfig.TxIndex++
 	}
 
+<<<<<<< HEAD
 	result, _, err := k.traceTx(ctx, cfg, txConfig, signer, tx, req.TraceConfig, false)
+=======
+	result, err := k.traceTx(ctx, signer, tx, traceTxConfig{
+		evmConfig:   cfg,
+		txConfig:    txConfig,
+		traceConfig: req.TraceConfig,
+	})
+>>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
 	if err != nil {
 		// error will be returned with detail status from traceTx
 		return nil, err
@@ -638,8 +654,18 @@ func (k Keeper) TraceBlock(c context.Context, req *types.QueryTraceBlockRequest)
 		result := types.TxTraceResult{}
 		ethTx := tx.AsTransaction()
 		txConfig.TxHash = ethTx.Hash()
+<<<<<<< HEAD
 		txConfig.TxIndex = uint(i) //nolint:gosec // G115 // won't exceed uint64
 		traceResult, logIndex, err := k.traceTx(ctx, cfg, txConfig, signer, ethTx, req.TraceConfig, true)
+=======
+		txConfig.TxIndex = uint(i)
+		traceResult, err := k.traceTx(ctx, signer, ethTx, traceTxConfig{
+			evmConfig:   cfg,
+			txConfig:    txConfig,
+			traceConfig: req.TraceConfig,
+			commit:      true,
+		})
+>>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
 		if err != nil {
 			result.Error = err.Error()
 		} else {
@@ -717,8 +743,26 @@ func (k Keeper) TraceCall(c context.Context, req *types.QueryTraceCallRequest) (
 	}
 	msg := args.ToMessage(baseFee, true, true)
 
+	// Get state overrides
+	var overrides *rpctypes.StateOverride
+	if len(req.Overrides) > 0 {
+		overrides = new(rpctypes.StateOverride)
+		if err = json.Unmarshal(req.Overrides, overrides); err != nil {
+			return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid state overrides format: %s", err.Error()))
+		}
+	}
+
 	// trace call
+<<<<<<< HEAD
 	result, _, err := k.traceTxWithMsg(ctx, cfg, txConfig, msg, req.GetTraceConfig(), false)
+=======
+	result, err := k.traceTxWithMsg(ctx, msg, traceTxConfig{
+		evmConfig:      cfg,
+		txConfig:       txConfig,
+		traceConfig:    req.GetTraceConfig(),
+		stateOverrides: overrides,
+	})
+>>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
 	if err != nil {
 		// error will be returned with detail status from traceTx
 		return nil, err
@@ -737,50 +781,69 @@ func (k Keeper) TraceCall(c context.Context, req *types.QueryTraceCallRequest) (
 // traceTx do trace on one transaction, it returns a tuple: (traceResult, nextLogIndex, error).
 func (k *Keeper) traceTx(
 	ctx sdk.Context,
-	cfg *statedb.EVMConfig,
-	txConfig statedb.TxConfig,
 	signer ethtypes.Signer,
 	tx *ethtypes.Transaction,
+<<<<<<< HEAD
 	traceConfig *types.TraceConfig,
 	commitMessage bool,
 ) (*any, uint, error) {
 	msg, err := core.TransactionToMessage(tx, signer, cfg.BaseFee)
+=======
+	config traceTxConfig,
+) (_ *any, err error) {
+	ctx, span := ctx.StartSpan(tracer, "traceTx", trace.WithAttributes(
+		attribute.String("tx_hash", tx.Hash().Hex()),
+	))
+	defer func() { evmtrace.EndSpanErr(span, err) }()
+	msg, err := core.TransactionToMessage(tx, signer, config.evmConfig.BaseFee)
+>>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
 	if err != nil {
 		return nil, 0, status.Error(codes.Internal, err.Error())
 	}
 
-	return k.traceTxWithMsg(ctx, cfg, txConfig, msg, traceConfig, commitMessage)
+	return k.traceTxWithMsg(ctx, msg, config)
 }
 
 // traceTxWithMsg do trace on one Ethereum message, it returns a tuple: (traceResult, nextLogIndex, error).
 func (k *Keeper) traceTxWithMsg(
 	ctx sdk.Context,
-	cfg *statedb.EVMConfig,
-	txConfig statedb.TxConfig,
 	msg *core.Message,
+<<<<<<< HEAD
 	traceConfig *types.TraceConfig,
 	commitMessage bool,
 ) (*interface{}, uint, error) {
+=======
+	config traceTxConfig,
+) (_ *any, err error) {
+	txConfig := config.txConfig
+	traceConfig := config.traceConfig
+	if traceConfig == nil {
+		traceConfig = &types.TraceConfig{}
+	}
+
+	ctx, span := ctx.StartSpan(tracer, "traceTxWithMsg", trace.WithAttributes(
+		attribute.String("tx_hash", txConfig.TxHash.Hex()),
+		attribute.Int("tx_index", int(txConfig.TxIndex)),
+		attribute.String("from", msg.From.Hex()),
+	))
+	defer func() { evmtrace.EndSpanErr(span, err) }()
+>>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
 	// Assemble the structured logger or the JavaScript tracer
 	var (
 		tracer           *tracers.Tracer
-		overrides        *ethparams.ChainConfig
+		chainOverrides   *ethparams.ChainConfig
 		jsonTracerConfig json.RawMessage
 		err              error
 		timeout          = defaultTraceTimeout
 	)
 
-	if traceConfig == nil {
-		traceConfig = &types.TraceConfig{}
-	}
-
-	if traceConfig != nil && traceConfig.TracerJsonConfig != "" {
+	if traceConfig.TracerJsonConfig != "" {
 		// ignore error. default to no traceConfig
 		_ = json.Unmarshal([]byte(traceConfig.TracerJsonConfig), &jsonTracerConfig)
 	}
 
 	if traceConfig.Overrides != nil {
-		overrides = traceConfig.Overrides.EthereumConfig(types.GetEthChainConfig().ChainID)
+		chainOverrides = traceConfig.Overrides.EthereumConfig(types.GetEthChainConfig().ChainID)
 	}
 
 	logConfig := logger.Config{
@@ -789,7 +852,7 @@ func (k *Keeper) traceTxWithMsg(
 		DisableStack:     traceConfig.DisableStack,
 		EnableReturnData: traceConfig.EnableReturnData,
 		Limit:            int(traceConfig.Limit),
-		Overrides:        overrides,
+		Overrides:        chainOverrides,
 	}
 
 	sLogger := logger.NewStructLogger(&logConfig)
@@ -837,7 +900,11 @@ func (k *Keeper) traceTxWithMsg(
 	// Build EVM execution context
 	ctx = buildTraceCtx(ctx, msg.GasLimit)
 	stateDB := statedb.New(ctx, k, txConfig)
+<<<<<<< HEAD
 	res, err := k.ApplyMessageWithConfig(ctx, stateDB, *msg, tracer.Hooks, commitMessage, false, cfg, txConfig, false, nil)
+=======
+	_, err = k.ApplyMessageWithConfig(ctx, stateDB, *msg, tracer.Hooks, config.commit, false, config.evmConfig, txConfig, false, config.stateOverrides)
+>>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
 	if err != nil {
 		return nil, 0, status.Error(codes.Internal, err.Error())
 	}

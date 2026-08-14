@@ -2,7 +2,38 @@
 
 ## UNRELEASED
 ### IMPROVEMENTS
+<<<<<<< HEAD
 - [\#1238](https://github.com/cosmos/evm/pull/1238) Validate ICS-20 acknowledgement encoding in the erc20 IBC v2 middleware.
+=======
+
+- [\#758](https://github.com/cosmos/evm/pull/758) Cleanup precompiles abi.json.
+- [\#810](https://github.com/cosmos/evm/pull/810) Fix integration test suite to resolve lock contention problem from external app injection
+- [\#811](https://github.com/cosmos/evm/pull/811) Use sdk's DefaultBondDenom for default evm denom in genesis.
+- [\#823](https://github.com/cosmos/evm/pull/823) Remove authz dependency from test suite and EvmApp interface
+- [\#829](https://github.com/cosmos/evm/pull/829) Seperate test app interface
+- [\#968](https://github.com/cosmos/evm/pull/968) Use normal gas config in ibc transfer to prevent potential DoS attack
+- [\#1029](https://github.com/cosmos/evm/pull/1029) Mark EvmCoinInfo.Decimals field as deprecated
+- [\#1079](https://github.com/cosmos/evm/pull/1079) Access Control List is now case-insensitive
+- [\#1103](https://github.com/cosmos/evm/pull/1103) Align normal gas metering in ibc erc20 callback.
+- [\#1108](https://github.com/cosmos/evm/pull/1108) Add json-rpc http server request body limit.
+- [\#1118](https://github.com/cosmos/evm/pull/1118) Cache chain denom for evm mempool
+- [\#1008](https://github.com/cosmos/evm/pull/1008) Stop enforcing JSON-RPC global filter cap and allow reclaim filters via configurable idle timeout.
+- [\#1130](https://github.com/cosmos/evm/pull/1130) Use `sdk.ValidateAuthority` in `x/vm`, `x/erc20`, and `x/feemarket` `MsgServer` handlers so authority can optionally be centralized via the consensus `AuthorityParams` introduced in cosmos-sdk v0.54.
+- [\#1164](https://github.com/cosmos/evm/pull/1164) Remove zero gas config from `ics20.transferWithStateDB` so inner KV ops in ICS20 transfer execution are metered, mirroring [\#1103](https://github.com/cosmos/evm/pull/1103).
+- [\#1220](https://github.com/cosmos/evm/pull/1220) Use latest block for setting txn defaults in rpc call.
+- [\#1232](https://github.com/cosmos/evm/pull/1232) Validate ICS-20 acknowledgement encoding in the erc20 IBC v2 middleware.
+- [\#1243](https://github.com/cosmos/evm/pull/1243) Deploy contracts from an EOA rather than a module account in the test helpers. It is also now required: contract creation bumps the sender's nonce, `SetAccount` persists nonce and balance together, and the EVM commit path may not write a module account's balance.
+
+### FEATURES
+
+- [\#589](https://github.com/cosmos/evm/pull/589) Remove parallelization blockers via migration from transient to object store, refactoring of gas, indexing, and bloom utilities.
+- [\#768](https://github.com/cosmos/evm/pull/768) Added ICS-02 Client Router precompile
+- [\#815](https://github.com/cosmos/evm/pull/815) Support for multi gRPC query clients serve with old binary.
+- [\#1082](https://github.com/cosmos/evm/pull/1082) Enable incarnation cache for verify result.
+- [\#1096](https://github.com/cosmos/evm/pull/1096) Allow eth_call overrides work with static precompiles.
+- [\#1181](https://github.com/cosmos/evm/pull/1181) Support state overrides in `debug_traceCall`.
+- [\#1228](https://github.com/cosmos/evm/pull/1228) Respect `ctx.IsSigverifyTx()` in EVM signature verification, mirroring x/auth to allow applications skip redundant ecrecover for txs the node already verified.
+>>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
 
 ### BUG FIXES
 - [\#732](https://github.com/cosmos/evm/pull/732) Fix mempool state-read races in integration tests.
