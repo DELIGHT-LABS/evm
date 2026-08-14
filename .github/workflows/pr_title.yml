@@ -3,6 +3,8 @@ name: PR Conventional Commit Validation
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+    paths-ignore:
+      - ".mergify.yml"
 
 jobs:
   validate-pr-title:

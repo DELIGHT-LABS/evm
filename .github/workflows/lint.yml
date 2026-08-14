@@ -4,6 +4,8 @@ name: Lint
 
 on:
   pull_request:
+    paths-ignore:
+      - ".mergify.yml"
   merge_group:
 
 # cancel superseded runs
