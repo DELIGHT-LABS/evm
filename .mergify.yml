@@ -26,6 +26,14 @@ queue_rules:
       body: pr-body
 
 pull_request_rules:
+  - name: queue approved automerge PRs
+    conditions:
+      - "#approved-reviews-by >= 1"
+      - "base ~= ^(main-(delight|xpla|maroo)|release/v0[.][0-9]+[.]x-(delight|xpla|maroo))$"
+      - "label = automerge"
+    actions:
+      queue:
+
   - name: sync merged main-delight PRs to chain branches
     conditions:
       - "base = main-delight"
