@@ -26,6 +26,7 @@ queue_rules:
       body: pr-body
 
 pull_request_rules:
+<<<<<<< HEAD
   - name: backport shared patches to v0.6.x
     conditions:
       - "base = main-delight"
@@ -37,15 +38,66 @@ pull_request_rules:
           - release/v0.6.x-delight
         labels:
           - automerge
+=======
+  - name: queue approved automerge PRs
+    conditions:
+      - "#approved-reviews-by >= 1"
+      - "base ~= ^(main-(delight|xpla|maroo)|release/v0[.][0-9]+[.]x-(delight|xpla|maroo))$"
+      - "label = automerge"
+    actions:
+      queue:
+
+  - name: sync merged main-delight PRs to chain branches
+    conditions:
+      - "base = main-delight"
+      - merged
+      - "-mergify-configuration-changed"
+    actions:
+      backport:
+        branches:
+          - main-xpla
+          - main-maroo
+        labels:
+          - kind/upstream-sync
+          - automerge
+        title: "{{ title }} (sync #{{ number }} to {{ destination_branch }})"
+        body: |
+          {{ body }}
+
+          Automatic sync of #{{ number }} from `main-delight` by Mergify.
+
+          {{ cherry_picked_commits }}
+>>>>>>> 70e37c8 (fix: align Mergify downstream backport rules (#13))
 
   - name: backport XPLA patches to v0.6.x
     conditions:
       - "base = main-xpla"
       - "label = backport/0.6.x"
-      - "-label = kind/upstream-sync"
     actions:
       backport:
         branches:
           - release/v0.6.x-xpla
+        labels:
+          - automerge
+
+  - name: backport XPLA patches to v0.7.x
+    conditions:
+      - "base = main-xpla"
+      - "label = backport/0.7.x"
+    actions:
+      backport:
+        branches:
+          - release/v0.7.x-xpla
+        labels:
+          - automerge
+
+  - name: backport Maroo patches to v0.7.x
+    conditions:
+      - "base = main-maroo"
+      - "label = backport/0.7.x"
+    actions:
+      backport:
+        branches:
+          - release/v0.7.x-maroo
         labels:
           - automerge
