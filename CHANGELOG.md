@@ -40,6 +40,11 @@ Follow the [migration document](docs/migrations/v0.6.x_to_v0.7.0.md) for upgrade
 - [\#815](https://github.com/cosmos/evm/pull/815) Support for multi gRPC query clients serve with old binary.
 - [\#1082](https://github.com/cosmos/evm/pull/1082) Enable incarnation cache for verify result.
 - [\#1096](https://github.com/cosmos/evm/pull/1096) Allow eth_call overrides work with static precompiles.
+<<<<<<< HEAD
+=======
+- [\#1181](https://github.com/cosmos/evm/pull/1181) Support state overrides in `debug_traceCall`.
+- [\#1228](https://github.com/cosmos/evm/pull/1228) Respect `ctx.IsSigverifyTx()` in EVM signature verification, mirroring x/auth to allow applications skip redundant ecrecover for txs the node already verified.
+>>>>>>> ba25928 (feat: support state overrides in debug_traceCall (#16))
 
 ### BUG FIXES
 
