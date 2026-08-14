@@ -2,6 +2,8 @@ name: System Test
 on:
   merge_group:
   pull_request:
+    paths-ignore:
+      - ".mergify.yml"
   push:
     branches:
       - main

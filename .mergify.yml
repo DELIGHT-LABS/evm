@@ -38,6 +38,7 @@ pull_request_rules:
     conditions:
       - "base = main-delight"
       - merged
+      - "-mergify-configuration-changed"
     actions:
       backport:
         branches:
@@ -45,6 +46,7 @@ pull_request_rules:
           - main-maroo
         labels:
           - kind/upstream-sync
+          - automerge
         title: "{{ title }} (sync #{{ number }} to {{ destination_branch }})"
         body: |
           {{ body }}
@@ -53,26 +55,35 @@ pull_request_rules:
 
           {{ cherry_picked_commits }}
 
-  - name: backport shared patches to v0.6.x
-    conditions:
-      - "base = main-delight"
-      - "label = backport/0.6.x"
-      - "-label = kind/upstream-sync"
-    actions:
-      backport:
-        branches:
-          - release/v0.6.x-delight
-        labels:
-          - automerge
-
   - name: backport XPLA patches to v0.6.x
     conditions:
       - "base = main-xpla"
       - "label = backport/0.6.x"
-      - "-label = kind/upstream-sync"
     actions:
       backport:
         branches:
           - release/v0.6.x-xpla
+        labels:
+          - automerge
+
+  - name: backport XPLA patches to v0.7.x
+    conditions:
+      - "base = main-xpla"
+      - "label = backport/0.7.x"
+    actions:
+      backport:
+        branches:
+          - release/v0.7.x-xpla
+        labels:
+          - automerge
+
+  - name: backport Maroo patches to v0.7.x
+    conditions:
+      - "base = main-maroo"
+      - "label = backport/0.7.x"
+    actions:
+      backport:
+        branches:
+          - release/v0.7.x-maroo
         labels:
           - automerge
