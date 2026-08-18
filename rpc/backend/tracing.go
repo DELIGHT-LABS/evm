@@ -236,7 +236,7 @@ func (b *Backend) TraceBlock(height rpctypes.BlockNumber,
 func (b *Backend) TraceCall(
 	args evmtypes.TransactionArgs,
 	blockNrOrHash rpctypes.BlockNumberOrHash,
-	config *rpctypes.TraceConfig,
+	config *rpctypes.TraceCallConfig,
 ) (interface{}, error) {
 	// Marshal tx args
 	bz, err := json.Marshal(&args)
@@ -268,7 +268,8 @@ func (b *Backend) TraceCall(
 	}
 
 	if config != nil {
-		traceCallRequest.TraceConfig = b.convertConfig(config)
+		traceCallRequest.TraceConfig = b.convertConfig(&config.TraceConfig)
+		traceCallRequest.Overrides = config.StateOverrides
 	}
 
 	// get the context of provided block
