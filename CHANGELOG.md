@@ -4,6 +4,9 @@
 ### IMPROVEMENTS
 - [\#1238](https://github.com/cosmos/evm/pull/1238) Validate ICS-20 acknowledgement encoding in the erc20 IBC v2 middleware.
 
+### FEATURES
+- [\#1181](https://github.com/cosmos/evm/pull/1181) Support state overrides in `debug_traceCall`.
+
 ### BUG FIXES
 - [\#732](https://github.com/cosmos/evm/pull/732) Fix mempool state-read races in integration tests.
 - [\#1243](https://github.com/cosmos/evm/pull/1243) Deploy contracts from an EOA rather than a module account in test helpers.

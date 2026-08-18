@@ -134,7 +134,7 @@ type EVMBackend interface {
 	// Tracing
 	TraceTransaction(hash common.Hash, config *types.TraceConfig) (interface{}, error)
 	TraceBlock(height types.BlockNumber, config *types.TraceConfig, block *tmrpctypes.ResultBlock) ([]*evmtypes.TxTraceResult, error)
-	TraceCall(args evmtypes.TransactionArgs, blockNrOrHash types.BlockNumberOrHash, config *types.TraceConfig) (interface{}, error)
+	TraceCall(args evmtypes.TransactionArgs, blockNrOrHash types.BlockNumberOrHash, config *types.TraceCallConfig) (interface{}, error)
 }
 
 var _ BackendI = (*Backend)(nil)

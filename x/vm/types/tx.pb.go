@@ -128,11 +128,12 @@ type MsgEthereumTxResponse struct {
 	VmError string `protobuf:"bytes,4,opt,name=vm_error,json=vmError,proto3" json:"vm_error,omitempty"`
 	// gas_used specifies how much gas was consumed by the transaction
 	GasUsed uint64 `protobuf:"varint,5,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`
-	// max_used_gas specifies the gas consumed by the transaction, not including refunds
+	// max_used_gas specifies the gas consumed by the transaction, not including
+	// refunds
 	MaxUsedGas uint64 `protobuf:"varint,6,opt,name=max_used_gas,json=maxUsedGas,proto3" json:"max_used_gas,omitempty"`
-	// include the block hash for json-rpc to use
+	// block_hash is included for json-rpc to use
 	BlockHash []byte `protobuf:"bytes,7,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
-	// include the block timestamp for json-rpc to use
+	// block_timestamp is included for json-rpc to use
 	BlockTimestamp uint64 `protobuf:"varint,8,opt,name=block_timestamp,json=blockTimestamp,proto3" json:"block_timestamp,omitempty"`
 }
 
