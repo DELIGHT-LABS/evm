@@ -346,6 +346,11 @@ func (b *Backend) EstimateGas(
 	// it will return an empty context and the gRPC query will use
 	// the latest block height for querying.
 	ctx = rpctypes.ContextWithHeight(ctx, blockNr.Int64())
+	ctx, cancel := b.withEVMTimeout(ctx)
+	// Make sure the context is canceled when the call has completed
+	// this makes sure resources are cleaned up.
+	defer cancel()
+
 	res, err := b.QueryClient.EstimateGas(ctx, &req)
 	if err != nil {
 		return 0, err
@@ -398,17 +403,7 @@ func (b *Backend) DoCall(
 	// it will return an empty context and the gRPC query will use
 	// the latest block height for querying.
 	ctx = rpctypes.ContextWithHeight(ctx, blockNr.Int64())
-	timeout := b.RPCEVMTimeout()
-
-	// Setup context so it may be canceled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-
+	ctx, cancel := b.withEVMTimeout(ctx)
 	// Make sure the context is canceled when the call has completed
 	// this makes sure resources are cleaned up.
 	defer cancel()
@@ -423,6 +418,15 @@ func (b *Backend) DoCall(
 	}
 
 	return res, nil
+}
+
+func (b *Backend) withEVMTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	// Setup context so it may be canceled the call has completed
+	// or, in case of unmetered gas, setup a context with a timeout.
+	if timeout := b.RPCEVMTimeout(); timeout > 0 {
+		return context.WithTimeout(ctx, timeout)
+	}
+	return context.WithCancel(ctx)
 }
 
 // GasPrice returns the current gas price based on Cosmos EVM' gas price oracle.
