@@ -236,20 +236,8 @@ func (b *Backend) TraceBlock(height rpctypes.BlockNumber,
 func (b *Backend) TraceCall(
 	args evmtypes.TransactionArgs,
 	blockNrOrHash rpctypes.BlockNumberOrHash,
-<<<<<<< HEAD
-	config *rpctypes.TraceConfig,
-) (interface{}, error) {
-=======
 	config *rpctypes.TraceCallConfig,
-) (result interface{}, err error) {
-	var toAddr string
-	if args.To != nil {
-		toAddr = args.To.Hex()
-	}
-	ctx, span := tracer.Start(ctx, "TraceCall", trace.WithAttributes(attribute.String("from", args.GetFrom().Hex()), attribute.String("to", toAddr), attribute.String("blockNrOrHash", unwrapBlockNOrHash(blockNrOrHash))))
-	defer func() { evmtrace.EndSpanErr(span, err) }()
-
->>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
+) (interface{}, error) {
 	// Marshal tx args
 	bz, err := json.Marshal(&args)
 	if err != nil {

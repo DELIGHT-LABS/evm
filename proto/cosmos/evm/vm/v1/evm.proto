@@ -42,13 +42,9 @@ message Params {
   ExtendedDenomOptions extended_denom_options = 11;
 }
 
-<<<<<<< HEAD
-message ExtendedDenomOptions {
-=======
 // ExtendedDenomOptions defines the extended denom options for the EVM
 message ExtendedDenomOptions {
   // extended_denom defines the extended denom used by the EVM
->>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
   string extended_denom = 1;
 }
 
@@ -371,5 +367,7 @@ message EvmCoinInfo {
   string extended_denom = 2;
   // display_denom defines the display denomination
   string display_denom = 3;
+  // decimals is now deprecated and will be removed in a future release. When it
+  // is removed we will assume the evm token denom is 18 decimal precision.
   uint32 decimals = 4;
 }

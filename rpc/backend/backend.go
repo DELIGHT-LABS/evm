@@ -132,15 +132,9 @@ type EVMBackend interface {
 	Status() (map[string]hexutil.Uint, error)
 
 	// Tracing
-<<<<<<< HEAD
 	TraceTransaction(hash common.Hash, config *types.TraceConfig) (interface{}, error)
 	TraceBlock(height types.BlockNumber, config *types.TraceConfig, block *tmrpctypes.ResultBlock) ([]*evmtypes.TxTraceResult, error)
-	TraceCall(args evmtypes.TransactionArgs, blockNrOrHash types.BlockNumberOrHash, config *types.TraceConfig) (interface{}, error)
-=======
-	TraceTransaction(ctx context.Context, hash common.Hash, config *types.TraceConfig) (interface{}, error)
-	TraceBlock(ctx context.Context, height types.BlockNumber, config *types.TraceConfig, block *tmrpctypes.ResultBlock) ([]*evmtypes.TxTraceResult, error)
-	TraceCall(ctx context.Context, args evmtypes.TransactionArgs, blockNrOrHash types.BlockNumberOrHash, config *types.TraceCallConfig) (interface{}, error)
->>>>>>> 8dd7f7b (feat: support state overrides in debug_traceCall (#16))
+	TraceCall(args evmtypes.TransactionArgs, blockNrOrHash types.BlockNumberOrHash, config *types.TraceCallConfig) (interface{}, error)
 }
 
 var _ BackendI = (*Backend)(nil)
