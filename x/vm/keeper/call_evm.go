@@ -50,18 +50,28 @@ func (k Keeper) CallEVM(ctx sdk.Context, stateDB *statedb.StateDB, abi abi.ABI, 
 // Note: if you call this from a precompile context, ensure that
 // you use the existing stateDB.
 func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from common.Address, contract *common.Address, data []byte, commit bool, callFromPrecompile bool, gasCap *big.Int) (_ *types.MsgEthereumTxResponse, err error) {
+	execCtx := ctx
+	if isPostTxHookContext(ctx) && !callFromPrecompile {
+		if stateDB == nil {
+			return nil, types.ErrNilStateDB
+		}
+		// Remeter opcode gas, then charge it once back onto the parent hook meter.
+		execCtx = buildTraceCtx(ctx, ctx.GasMeter().GasRemaining())
+		stateDB = statedb.New(execCtx, stateDB.Keeper(), statedb.NewEmptyTxConfig())
+	}
+
 	contractAddr := ""
 	if contract != nil {
 		contractAddr = contract.Hex()
 	}
-	ctx, span := ctx.StartSpan(tracer, "CallEVMWithData", trace.WithAttributes(
+	execCtx, span := execCtx.StartSpan(tracer, "CallEVMWithData", trace.WithAttributes(
 		attribute.String("from", from.Hex()),
 		attribute.String("contract", contractAddr),
 		attribute.Bool("commit", commit),
 		attribute.Int("data_size", len(data)),
 	))
 	defer func() { evmtrace.EndSpanErr(span, err) }()
-	nonce, err := k.accountKeeper.GetSequence(ctx, from.Bytes())
+	nonce, err := k.accountKeeper.GetSequence(execCtx, from.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +99,7 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 		AccessList: ethtypes.AccessList{},
 	}
 
-	res, err := k.ApplyMessage(ctx, stateDB, msg, nil, commit, callFromPrecompile, true)
+	res, err := k.ApplyMessage(execCtx, stateDB, msg, nil, commit, callFromPrecompile, true)
 	if err != nil {
 		return nil, err
 	}
