@@ -6,6 +6,7 @@
 ### API-BREAKING
 ### IMPROVEMENTS
 ### FEATURES
+- [\#1181](https://github.com/cosmos/evm/pull/1181) Support state overrides in `debug_traceCall`.
 ### BUG FIXES
 
 ## v0.7.0
