@@ -2,12 +2,14 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 
+	"github.com/cosmos/evm/contracts"
 	"github.com/cosmos/evm/x/vm/keeper"
 	"github.com/cosmos/evm/x/vm/statedb"
 	"github.com/cosmos/evm/x/vm/types"
@@ -32,6 +34,54 @@ type FailureHook struct{}
 
 func (dh *FailureHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ core.Message, _ *ethtypes.Receipt) error {
 	return errors.New("post tx processing failed")
+}
+
+type hookRevertError struct {
+	data []byte
+}
+
+func (e hookRevertError) Error() string      { return "post tx hook reverted" }
+func (e hookRevertError) RevertData() []byte { return e.data }
+
+type RevertHook struct {
+	Data []byte
+}
+
+func (h RevertHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ core.Message, _ *ethtypes.Receipt) error {
+	return hookRevertError{data: h.Data}
+}
+
+type NestedEVMGasHook struct {
+	keeper   *keeper.Keeper
+	contract common.Address
+	GasUsed  uint64
+}
+
+func (h *NestedEVMGasHook) PostTxProcessing(ctx sdk.Context, from common.Address, _ core.Message, _ *ethtypes.Receipt) error {
+	data, err := contracts.ERC20MinterBurnerDecimalsContract.ABI.Pack("balanceOf", from)
+	if err != nil {
+		return err
+	}
+	stateDB := statedb.New(ctx, h.keeper, statedb.NewEmptyTxConfig())
+	before := ctx.GasMeter().GasConsumed()
+	response, err := h.keeper.CallEVMWithData(
+		ctx,
+		stateDB,
+		from,
+		&h.contract,
+		data,
+		false,
+		false,
+		new(big.Int).SetUint64(ctx.GasMeter().GasRemaining()),
+	)
+	if err != nil {
+		return err
+	}
+	h.GasUsed = response.GasUsed
+	if delta := ctx.GasMeter().GasConsumed() - before; delta != response.GasUsed {
+		return fmt.Errorf("nested EVM gas charged %d, response used %d", delta, response.GasUsed)
+	}
+	return nil
 }
 
 func (s *KeeperTestSuite) TestEvmHooks() {
@@ -131,4 +181,21 @@ func (s *KeeperTestSuite) TestPostTxProcessingFailureLogReversion() {
 
 	// Critical test: Verify logs are completely cleared
 	s.Require().Nil(res.Logs, "res.Logs should be nil after PostTxProcessing failure")
+
+	var gasUsed, failure string
+	for _, event := range ctx.EventManager().Events() {
+		if event.Type != types.EventTypeEthereumTx {
+			continue
+		}
+		for _, attr := range event.Attributes {
+			switch attr.Key {
+			case types.AttributeKeyTxGasUsed:
+				gasUsed = attr.Value
+			case types.AttributeKeyEthereumTxFailed:
+				failure = attr.Value
+			}
+		}
+	}
+	s.Require().Equal(fmt.Sprintf("%d", res.GasUsed), gasUsed)
+	s.Require().Equal(res.VmError, failure)
 }

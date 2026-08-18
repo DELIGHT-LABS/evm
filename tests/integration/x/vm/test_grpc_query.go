@@ -11,6 +11,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core"
+	gethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	ethlogger "github.com/ethereum/go-ethereum/eth/tracers/logger"
@@ -27,12 +29,14 @@ import (
 	"github.com/cosmos/evm/testutil/tx"
 	testutiltypes "github.com/cosmos/evm/testutil/types"
 	feemarkettypes "github.com/cosmos/evm/x/feemarket/types"
+	"github.com/cosmos/evm/x/vm/keeper"
 	"github.com/cosmos/evm/x/vm/keeper/testdata"
 	"github.com/cosmos/evm/x/vm/statedb"
 	"github.com/cosmos/evm/x/vm/types"
 
 	sdkmath "cosmossdk.io/math"
 
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	vestingtypes "github.com/cosmos/cosmos-sdk/x/auth/vesting/types"
@@ -968,6 +972,418 @@ func (s *KeeperTestSuite) TestEstimateGas() {
 			}
 		})
 	}
+}
+
+func (s *KeeperTestSuite) TestEstimateGasIncludesDeterministicPostTxHookGas() {
+	s.SetupTest()
+
+	const hookGas = uint64(1_000)
+	var lastReceipt *gethtypes.Receipt
+	var lastPreliminaryGas uint64
+	var lastPreliminaryCumulativeGas uint64
+	firstHook := &testHooks{
+		postProcessing: func(ctx sdk.Context, _ common.Address, _ core.Message, _ *gethtypes.Receipt) error {
+			ctx.GasMeter().ConsumeGas(400, "first deterministic post tx hook")
+			return nil
+		},
+	}
+	secondHook := &testHooks{
+		postProcessing: func(ctx sdk.Context, _ common.Address, _ core.Message, receipt *gethtypes.Receipt) error {
+			s.Require().Equal(storetypes.KVGasConfig(), ctx.KVGasConfig())
+			s.Require().Equal(storetypes.TransientGasConfig(), ctx.TransientKVGasConfig())
+			lastReceipt = receipt
+			lastPreliminaryGas = receipt.GasUsed
+			lastPreliminaryCumulativeGas = receipt.CumulativeGasUsed
+			ctx.GasMeter().ConsumeGas(600, "second deterministic post tx hook")
+			return nil
+		},
+	}
+	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(firstHook, secondHook))
+
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	zeroGasPrice := hexutil.Big(*big.NewInt(0))
+	args := types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		GasPrice: &zeroGasPrice,
+	}
+	argsBz, err := json.Marshal(args)
+	s.Require().NoError(err)
+	req := &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	}
+
+	estimate, err := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), req)
+	s.Require().NoError(err)
+	s.Require().Equal(ethparams.TxGas+hookGas, estimate.Gas)
+	s.Require().Equal(ethparams.TxGas, lastPreliminaryGas)
+	s.Require().Equal(ethparams.TxGas, lastPreliminaryCumulativeGas)
+
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+		To:       &recipient,
+		GasLimit: estimate.Gas,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	msg := tx.GetMsgs()[0].(*types.MsgEthereumTx)
+	ctx := s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(estimate.Gas * 2))
+	response, err := s.Network.App.GetEVMKeeper().ApplyTransaction(ctx, msg.AsTransaction())
+	s.Require().NoError(err)
+	s.Require().False(response.Failed())
+	s.Require().Equal(estimate.Gas, response.GasUsed)
+	s.Require().NotNil(lastReceipt)
+	s.Require().Equal(estimate.Gas, lastReceipt.GasUsed)
+	s.Require().Equal(estimate.Gas, lastReceipt.CumulativeGasUsed)
+	s.Require().Equal(estimate.Gas, ctx.GasMeter().GasConsumed())
+	s.Require().Equal(estimate.Gas, s.Network.App.GetEVMKeeper().GetTransientGasUsed(ctx))
+}
+
+func (s *KeeperTestSuite) TestEstimateGasPlainTransferFinalReprobe() {
+	s.SetupTest()
+
+	var calls int
+	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(&testHooks{
+		postProcessing: func(_ sdk.Context, _ common.Address, _ core.Message, _ *gethtypes.Receipt) error {
+			calls++
+			return nil
+		},
+	}))
+
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	zeroGasPrice := hexutil.Big(*big.NewInt(0))
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		GasPrice: &zeroGasPrice,
+	})
+	s.Require().NoError(err)
+
+	estimate, err := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(ethparams.TxGas, estimate.Gas)
+	s.Require().Equal(2, calls, "the shortcut result must be proved by a final candidate execution")
+}
+
+func (s *KeeperTestSuite) TestEstimateGasChargesNestedHookEVMGasExactlyOnce() {
+	s.SetupTest()
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	hook := &NestedEVMGasHook{
+		keeper:   evmKeeper,
+		contract: common.HexToAddress(testconstants.WEVMOSContractMainnet),
+	}
+	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(hook))
+
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	zeroGasPrice := hexutil.Big(*big.NewInt(0))
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		GasPrice: &zeroGasPrice,
+	})
+	s.Require().NoError(err)
+
+	estimate, err := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	})
+	s.Require().NoError(err)
+	s.Require().Greater(hook.GasUsed, uint64(0))
+	s.Require().Equal(ethparams.TxGas+hook.GasUsed, estimate.Gas)
+
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+		To:       &recipient,
+		GasLimit: estimate.Gas,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	response, err := evmKeeper.ApplyTransaction(
+		s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(estimate.Gas*2)),
+		tx.GetMsgs()[0].(*types.MsgEthereumTx).AsTransaction(),
+	)
+	s.Require().NoError(err)
+	s.Require().False(response.Failed())
+	s.Require().Equal(estimate.Gas, response.GasUsed)
+}
+
+func (s *KeeperTestSuite) TestEstimateGasPreservesPostTxHookRevertData() {
+	s.SetupTest()
+
+	revertData := []byte{0xde, 0xad, 0xbe, 0xef}
+	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(RevertHook{Data: revertData}))
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	zeroGasPrice := hexutil.Big(*big.NewInt(0))
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		GasPrice: &zeroGasPrice,
+	})
+	s.Require().NoError(err)
+
+	estimate, err := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          100_000,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(vm.ErrExecutionReverted.Error(), estimate.VmError)
+	s.Require().Equal(revertData, estimate.Ret)
+
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+		To:       &recipient,
+		GasLimit: 100_000,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	response, err := s.Network.App.GetEVMKeeper().ApplyTransaction(
+		s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(200_000)),
+		tx.GetMsgs()[0].(*types.MsgEthereumTx).AsTransaction(),
+	)
+	s.Require().NoError(err)
+	s.Require().True(response.Failed())
+	s.Require().Equal(vm.ErrExecutionReverted.Error(), response.VmError)
+	s.Require().Equal(revertData, response.Ret)
+}
+
+func (s *KeeperTestSuite) TestEstimateGasPostTxHookFailureClasses() {
+	for _, tc := range []struct {
+		name        string
+		hook        types.EvmHooks
+		errContains string
+	}{
+		{
+			name:        "ordinary error is stable",
+			hook:        &FailureHook{},
+			errContains: "failed to execute post transaction processing",
+		},
+		{
+			name: "hook out of gas reports allowance",
+			hook: &testHooks{postProcessing: func(ctx sdk.Context, _ common.Address, _ core.Message, _ *gethtypes.Receipt) error {
+				ctx.GasMeter().ConsumeGas(ctx.GasMeter().GasRemaining()+1, "force estimate hook out of gas")
+				return nil
+			}},
+			errContains: "gas required exceeds allowance",
+		},
+	} {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(tc.hook))
+			sender := s.Keyring.GetAddr(0)
+			recipient := s.Keyring.GetAddr(1)
+			zeroGasPrice := hexutil.Big(*big.NewInt(0))
+			argsBz, err := json.Marshal(types.TransactionArgs{
+				From:     &sender,
+				To:       &recipient,
+				GasPrice: &zeroGasPrice,
+			})
+			s.Require().NoError(err)
+			req := &types.EthCallRequest{
+				Args:            argsBz,
+				GasCap:          100_000,
+				ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+			}
+
+			_, firstErr := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), req)
+			_, secondErr := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), req)
+			s.Require().Error(firstErr)
+			s.Require().Error(secondErr)
+			s.Require().Contains(firstErr.Error(), tc.errContains)
+			s.Require().Equal(firstErr.Error(), secondErr.Error())
+		})
+	}
+}
+
+func (s *KeeperTestSuite) TestEstimateGasRecoversWhenOptimisticHookCandidateFails() {
+	s.SetupTest()
+
+	const hookRemainingThreshold = uint64(50_000)
+	var (
+		sawHighCandidate     bool
+		sawOptimisticFailure bool
+	)
+	hook := &testHooks{postProcessing: func(ctx sdk.Context, _ common.Address, _ core.Message, _ *gethtypes.Receipt) error {
+		if ctx.GasMeter().Limit() > hookRemainingThreshold {
+			sawHighCandidate = true
+			ctx.GasMeter().ConsumeGas(1_000, "small high-limit hook work")
+			return nil
+		}
+		sawOptimisticFailure = true
+		ctx.GasMeter().ConsumeGas(ctx.GasMeter().GasRemaining()+1, "gas-sensitive hook work")
+		return nil
+	}}
+	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(hook))
+
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	zeroGasPrice := hexutil.Big(*big.NewInt(0))
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		GasPrice: &zeroGasPrice,
+	})
+	s.Require().NoError(err)
+	estimate, err := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          500_000,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	})
+	s.Require().NoError(err)
+	s.Require().True(sawHighCandidate)
+	s.Require().True(sawOptimisticFailure)
+	s.Require().Greater(estimate.Gas, ethparams.TxGas+hookRemainingThreshold)
+
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+		To:       &recipient,
+		GasLimit: estimate.Gas,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	response, err := s.Network.App.GetEVMKeeper().ApplyTransaction(
+		s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(estimate.Gas*2)),
+		tx.GetMsgs()[0].(*types.MsgEthereumTx).AsTransaction(),
+	)
+	s.Require().NoError(err)
+	s.Require().False(response.Failed())
+	s.Require().LessOrEqual(response.GasUsed, estimate.Gas)
+}
+
+func (s *KeeperTestSuite) TestEstimateGasCandidateStateIsDiscardedAndHooksSeePostState() {
+	s.SetupTest()
+
+	erc20Contract, err := testdata.LoadERC20Contract()
+	s.Require().NoError(err)
+	contractAddr, err := deployErc20Contract(s.Keyring.GetKey(0), s.Factory)
+	s.Require().NoError(err)
+	s.Require().NoError(s.Network.NextBlock())
+
+	const mintedDenom = "aestimatehook"
+	transferAmount := big.NewInt(123)
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	recipientBefore := new(uint256.Int).Set(evmKeeper.GetBalance(s.Network.GetContext(), recipient))
+	moduleAddr := s.Network.App.GetAccountKeeper().GetModuleAddress("mint")
+
+	var sawPostState, sawTrace, sawCleanCandidate bool
+	sawCleanCandidate = true
+	hook := &testHooks{
+		postProcessing: func(ctx sdk.Context, _ common.Address, msg core.Message, _ *gethtypes.Receipt) error {
+			if msg.Value.Sign() > 0 {
+				sawPostState = sawPostState || evmKeeper.GetBalance(ctx, recipient).Cmp(recipientBefore) > 0
+			}
+			if len(msg.Data) > 0 {
+				touches, _ := evmKeeper.GetTxTrace(ctx, 0)
+				sawTrace = sawTrace || len(touches) > 0
+			}
+			beforeMint := s.Network.App.GetBankKeeper().GetBalance(ctx, moduleAddr, mintedDenom)
+			sawCleanCandidate = sawCleanCandidate && beforeMint.IsZero()
+			return s.Network.App.GetMintKeeper().MintCoins(
+				ctx,
+				sdk.NewCoins(sdk.NewInt64Coin(mintedDenom, 1)),
+			)
+		},
+	}
+	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(hook))
+
+	zeroGasPrice := hexutil.Big(*big.NewInt(0))
+	value := hexutil.Big(*transferAmount)
+	args := types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		Value:    &value,
+		GasPrice: &zeroGasPrice,
+	}
+	argsBz, err := json.Marshal(args)
+	s.Require().NoError(err)
+	req := &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	}
+
+	first, err := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), req)
+	s.Require().NoError(err)
+	second, err := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), req)
+	s.Require().NoError(err)
+
+	transferData, err := erc20Contract.ABI.Pack("transfer", recipient, big.NewInt(1))
+	s.Require().NoError(err)
+	contractArgs := types.TransactionArgs{
+		From:     &sender,
+		To:       &contractAddr,
+		Data:     (*hexutil.Bytes)(&transferData),
+		GasPrice: &zeroGasPrice,
+	}
+	contractArgsBz, err := json.Marshal(contractArgs)
+	s.Require().NoError(err)
+	_, err = s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            contractArgsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	})
+	s.Require().NoError(err)
+
+	s.Require().Equal(first.Gas, second.Gas)
+	s.Require().Greater(first.Gas, ethparams.TxGas)
+	s.Require().True(sawPostState, "hook must see EVM post-state")
+	s.Require().True(sawTrace, "hook must see the candidate tx trace")
+	s.Require().True(sawCleanCandidate, "each probe must start without prior hook state")
+	s.Require().True(s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), moduleAddr, mintedDenom).IsZero())
+	touches, transfers := evmKeeper.GetTxTrace(s.Network.GetContext(), 0)
+	s.Require().Empty(touches)
+	s.Require().Empty(transfers)
+	s.Require().Equal(recipientBefore, evmKeeper.GetBalance(s.Network.GetContext(), recipient))
+}
+
+func (s *KeeperTestSuite) TestEstimateGasHookSeesStateOverrideWithoutLeakingIt() {
+	s.SetupTest()
+
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	recipientBefore := new(uint256.Int).Set(evmKeeper.GetBalance(s.Network.GetContext(), recipient))
+	var sawOverriddenPostState bool
+	hook := &testHooks{
+		postProcessing: func(ctx sdk.Context, _ common.Address, _ core.Message, _ *gethtypes.Receipt) error {
+			balance := evmKeeper.GetBalance(ctx, recipient)
+			sawOverriddenPostState = balance.Cmp(uint256.NewInt(100)) == 0
+			return nil
+		},
+	}
+	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(hook))
+
+	zeroGasPrice := hexutil.Big(*big.NewInt(0))
+	value := hexutil.Big(*big.NewInt(100))
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		Value:    &value,
+		GasPrice: &zeroGasPrice,
+	})
+	s.Require().NoError(err)
+	overrides := []byte(fmt.Sprintf(`{"%s":{"balance":"0x0"}}`, recipient.Hex()))
+
+	estimate, err := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+		Overrides:       overrides,
+	})
+	s.Require().NoError(err)
+	s.Require().GreaterOrEqual(estimate.Gas, ethparams.TxGas)
+	s.Require().True(sawOverriddenPostState)
+	s.Require().Equal(recipientBefore, evmKeeper.GetBalance(s.Network.GetContext(), recipient))
 }
 
 func (s *KeeperTestSuite) TestEstimateGasWithStateOverrides() {
