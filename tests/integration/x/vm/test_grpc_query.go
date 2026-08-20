@@ -1041,6 +1041,63 @@ func (s *KeeperTestSuite) TestEstimateGasIncludesDeterministicPostTxHookGas() {
 	s.Require().Equal(estimate.Gas, s.Network.App.GetEVMKeeper().GetTransientGasUsed(ctx))
 }
 
+func (s *KeeperTestSuite) TestEstimateGasTxTraceIndexMatchesApply() {
+	s.SetupTest()
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	hook := &txTraceByReceiptIndexHook{keeper: evmKeeper}
+	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(hook))
+
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	value := hexutil.Big(*big.NewInt(1))
+	zeroGasPrice := hexutil.Big(*big.NewInt(0))
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		Value:    &value,
+		GasPrice: &zeroGasPrice,
+	})
+	s.Require().NoError(err)
+
+	queryCtx := s.Network.GetQueryContext()
+	s.Require().Equal(-1, queryCtx.TxIndex())
+	estimate, err := s.Network.GetEvmClient().EstimateGas(queryCtx, &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: queryCtx.BlockHeader().ProposerAddress,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(statedb.NewEmptyTxConfig().TxIndex, hook.ReceiptIndex)
+	s.Require().Greater(hook.Touches, 0)
+	estimateTouches := hook.Touches
+	estimateTransfers := hook.Transfers
+	estimateHookGas := hook.HookGas
+
+	const applyTxIndex = 3
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+		To:       &recipient,
+		Amount:   big.NewInt(1),
+		GasLimit: estimate.Gas,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	ethTx := tx.GetMsgs()[0].(*types.MsgEthereumTx).AsTransaction()
+	applyCtx := s.Network.GetContext().
+		WithTxIndex(applyTxIndex).
+		WithGasMeter(storetypes.NewGasMeter(estimate.Gas * 2))
+	txConfig := evmKeeper.TxConfig(applyCtx, ethTx.Hash())
+	response, err := evmKeeper.ApplyTransaction(applyCtx, ethTx)
+	s.Require().NoError(err)
+	s.Require().False(response.Failed())
+	s.Require().Equal(txConfig.TxIndex, hook.ReceiptIndex)
+	s.Require().Equal(uint(applyTxIndex), hook.ReceiptIndex)
+	s.Require().Equal(estimateTouches, hook.Touches)
+	s.Require().Equal(estimateTransfers, hook.Transfers)
+	s.Require().Equal(estimateHookGas, hook.HookGas)
+	s.Require().Equal(estimate.Gas, response.GasUsed)
+}
+
 func (s *KeeperTestSuite) TestEstimateGasPlainTransferFinalReprobe() {
 	s.SetupTest()
 

@@ -84,6 +84,29 @@ func (h *NestedEVMGasHook) PostTxProcessing(ctx sdk.Context, from common.Address
 	return nil
 }
 
+// txTraceByReceiptIndexHook looks up the candidate tx trace using the receipt
+// index, matching downstream hooks that call GetTxTrace(ctx, receipt.TransactionIndex).
+type txTraceByReceiptIndexHook struct {
+	keeper       *keeper.Keeper
+	ReceiptIndex uint
+	Touches      int
+	Transfers    int
+	HookGas      uint64
+}
+
+func (h *txTraceByReceiptIndexHook) PostTxProcessing(ctx sdk.Context, _ common.Address, _ core.Message, receipt *ethtypes.Receipt) error {
+	h.ReceiptIndex = receipt.TransactionIndex
+	before := ctx.GasMeter().GasConsumed()
+	touches, transfers := h.keeper.GetTxTrace(ctx, uint64(receipt.TransactionIndex))
+	h.Touches = len(touches)
+	h.Transfers = len(transfers)
+	if h.Touches > 0 {
+		ctx.GasMeter().ConsumeGas(uint64(h.Touches)*1042, "policy get per call touch")
+	}
+	h.HookGas = ctx.GasMeter().GasConsumed() - before
+	return nil
+}
+
 func (s *KeeperTestSuite) TestEvmHooks() {
 	testCases := []struct {
 		msg       string

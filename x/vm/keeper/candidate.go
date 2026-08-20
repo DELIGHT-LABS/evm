@@ -204,7 +204,7 @@ func newCandidateReceipt(parentCtx sdk.Context, input txCandidateInput, response
 		GasUsed:           response.GasUsed,
 		BlockHash:         common.BytesToHash(parentCtx.HeaderHash()),
 		BlockNumber:       big.NewInt(parentCtx.BlockHeight()),
-		TransactionIndex:  uint(parentCtx.TxIndex()), //nolint:gosec
+		TransactionIndex:  input.txConfig.TxIndex,
 		Status:            status,
 	}
 	receipt.Bloom = ethtypes.CreateBloom(receipt)
