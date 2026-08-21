@@ -349,10 +349,18 @@ func (b *Backend) EstimateGas(
 	// it will return an empty context and the gRPC query will use
 	// the latest block height for querying.
 	ctx = rpctypes.ContextWithHeight(ctx, blockNr.Int64())
+<<<<<<< HEAD
 	ctx, cancel := b.withEVMTimeout(ctx)
 	// Make sure the context is canceled when the call has completed
 	// this makes sure resources are cleaned up.
 	defer cancel()
+=======
+	if timeout := b.RPCEVMTimeout(); timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+>>>>>>> 3e646c4 (fix(rpc): apply json-rpc.evm-timeout to eth_estimateGas (#1265))
 
 	res, err := b.QueryClient.EstimateGas(ctx, &req)
 	if err != nil {
@@ -406,10 +414,18 @@ func (b *Backend) DoCall(
 	// it will return an empty context and the gRPC query will use
 	// the latest block height for querying.
 	ctx = rpctypes.ContextWithHeight(ctx, blockNr.Int64())
+<<<<<<< HEAD
 	ctx, cancel := b.withEVMTimeout(ctx)
 	// Make sure the context is canceled when the call has completed
 	// this makes sure resources are cleaned up.
 	defer cancel()
+=======
+	if timeout := b.RPCEVMTimeout(); timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+>>>>>>> 3e646c4 (fix(rpc): apply json-rpc.evm-timeout to eth_estimateGas (#1265))
 
 	res, err := b.QueryClient.EthCall(ctx, &req)
 	if err != nil {
