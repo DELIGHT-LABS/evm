@@ -104,13 +104,24 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 	return res, nil
 }
 
-// CallEVMViewWithData performs an isolated, non-committing EVM call and charges
-// only the EVM execution gas back to the caller's gas meter.
+// CallEVMViewWithData performs an isolated, non-committing EVM call, caps the
+// execution at the caller's remaining gas, and charges only the EVM execution
+// gas back to the caller's gas meter.
 func (k *Keeper) CallEVMViewWithData(ctx sdk.Context, from common.Address, contract *common.Address, data []byte, gasCap *big.Int) (_ *types.MsgEthereumTxResponse, err error) {
-	execCtx := buildTraceCtx(ctx, ctx.GasMeter().GasRemaining())
+	remainingGas := ctx.GasMeter().GasRemaining()
+	if remainingGas == 0 {
+		ctx.GasMeter().ConsumeGas(1, "apply evm message")
+	}
+
+	effectiveGasCap := new(big.Int).SetUint64(remainingGas)
+	if gasCap != nil && gasCap.Sign() > 0 && gasCap.Cmp(effectiveGasCap) < 0 {
+		effectiveGasCap.Set(gasCap)
+	}
+
+	execCtx := buildTraceCtx(ctx, remainingGas)
 	stateDB := statedb.New(execCtx, k, statedb.NewEmptyTxConfig())
 
-	res, err := k.CallEVMWithData(execCtx, stateDB, from, contract, data, false, false, gasCap)
+	res, err := k.CallEVMWithData(execCtx, stateDB, from, contract, data, false, false, effectiveGasCap)
 	if err != nil {
 		if res != nil && res.Failed() {
 			k.ResetGasMeterAndConsumeGas(ctx, ctx.GasMeter().Limit())
