@@ -50,28 +50,18 @@ func (k Keeper) CallEVM(ctx sdk.Context, stateDB *statedb.StateDB, abi abi.ABI, 
 // Note: if you call this from a precompile context, ensure that
 // you use the existing stateDB.
 func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from common.Address, contract *common.Address, data []byte, commit bool, callFromPrecompile bool, gasCap *big.Int) (_ *types.MsgEthereumTxResponse, err error) {
-	execCtx := ctx
-	if isPostTxHookContext(ctx) && !callFromPrecompile {
-		if stateDB == nil {
-			return nil, types.ErrNilStateDB
-		}
-		// Remeter opcode gas, then charge it once back onto the parent hook meter.
-		execCtx = buildTraceCtx(ctx, ctx.GasMeter().GasRemaining())
-		stateDB = statedb.New(execCtx, stateDB.Keeper(), statedb.NewEmptyTxConfig())
-	}
-
 	contractAddr := ""
 	if contract != nil {
 		contractAddr = contract.Hex()
 	}
-	execCtx, span := execCtx.StartSpan(tracer, "CallEVMWithData", trace.WithAttributes(
+	ctx, span := ctx.StartSpan(tracer, "CallEVMWithData", trace.WithAttributes(
 		attribute.String("from", from.Hex()),
 		attribute.String("contract", contractAddr),
 		attribute.Bool("commit", commit),
 		attribute.Int("data_size", len(data)),
 	))
 	defer func() { evmtrace.EndSpanErr(span, err) }()
-	nonce, err := k.accountKeeper.GetSequence(execCtx, from.Bytes())
+	nonce, err := k.accountKeeper.GetSequence(ctx, from.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +89,7 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 		AccessList: ethtypes.AccessList{},
 	}
 
-	res, err := k.ApplyMessage(execCtx, stateDB, msg, nil, commit, callFromPrecompile, true)
+	res, err := k.ApplyMessage(ctx, stateDB, msg, nil, commit, callFromPrecompile, true)
 	if err != nil {
 		return nil, err
 	}
@@ -111,5 +101,23 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 
 	ctx.GasMeter().ConsumeGas(res.GasUsed, "apply evm message")
 
+	return res, nil
+}
+
+// CallEVMViewWithData performs an isolated, non-committing EVM call and charges
+// only the EVM execution gas back to the caller's gas meter.
+func (k *Keeper) CallEVMViewWithData(ctx sdk.Context, from common.Address, contract *common.Address, data []byte, gasCap *big.Int) (_ *types.MsgEthereumTxResponse, err error) {
+	execCtx := buildTraceCtx(ctx, ctx.GasMeter().GasRemaining())
+	stateDB := statedb.New(execCtx, k, statedb.NewEmptyTxConfig())
+
+	res, err := k.CallEVMWithData(execCtx, stateDB, from, contract, data, false, false, gasCap)
+	if err != nil {
+		if res != nil && res.Failed() {
+			k.ResetGasMeterAndConsumeGas(ctx, ctx.GasMeter().Limit())
+		}
+		return res, err
+	}
+
+	ctx.GasMeter().ConsumeGas(res.GasUsed, "apply evm message")
 	return res, nil
 }
