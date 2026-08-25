@@ -1262,6 +1262,32 @@ func (s *KeeperTestSuite) TestCallEVMViewWithDataDiscardsStateChanges() {
 	s.Require().Equal(common.Hash{}, evmKeeper.GetState(s.Network.GetContext(), contract, common.Hash{}))
 }
 
+func (s *KeeperTestSuite) TestCallEVMViewWithDataClampsGasToParentRemaining() {
+	s.SetupTest()
+
+	const parentGasLimit = uint64(30_000)
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	contract := common.HexToAddress("0x0000000000000000000000000000000000000044")
+	stateDB := statedb.New(s.Network.GetContext(), evmKeeper, statedb.NewEmptyTxConfig())
+	stateDB.SetCode(contract, []byte{0x5b, 0x60, 0x00, 0x56}, tracing.CodeChangeUnspecified)
+	s.Require().NoError(stateDB.Commit())
+
+	ctx := s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(parentGasLimit))
+	response, err := evmKeeper.CallEVMViewWithData(
+		ctx,
+		s.Keyring.GetAddr(0),
+		&contract,
+		nil,
+		new(big.Int).SetUint64(100_000),
+	)
+	s.Require().Error(err)
+	s.Require().NotNil(response)
+	s.Require().True(response.Failed())
+	s.Require().LessOrEqual(response.GasUsed, parentGasLimit)
+	s.Require().Equal(parentGasLimit, ctx.GasMeter().GasConsumed())
+}
+
 func (s *KeeperTestSuite) TestEstimateGasPreservesPostTxHookRevertData() {
 	s.SetupTest()
 
