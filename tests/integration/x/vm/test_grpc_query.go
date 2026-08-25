@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	gethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -1171,6 +1172,94 @@ func (s *KeeperTestSuite) TestEstimateGasChargesNestedHookEVMGasExactlyOnce() {
 	s.Require().NoError(err)
 	s.Require().False(response.Failed())
 	s.Require().Equal(estimate.Gas, response.GasUsed)
+}
+
+func (s *KeeperTestSuite) TestCallEVMWithDataPreservesPostTxHookStateDB() {
+	s.SetupTest()
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	var ret []byte
+	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(&testHooks{
+		postProcessing: func(ctx sdk.Context, from common.Address, _ core.Message, _ *gethtypes.Receipt) error {
+			contract := common.HexToAddress("0x0000000000000000000000000000000000000042")
+			stateDB := statedb.New(ctx, evmKeeper, statedb.NewEmptyTxConfig())
+			stateDB.SetCode(
+				contract,
+				[]byte{0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3},
+				tracing.CodeChangeUnspecified,
+			)
+			response, err := evmKeeper.CallEVMWithData(
+				ctx,
+				stateDB,
+				from,
+				&contract,
+				nil,
+				false,
+				false,
+				new(big.Int).SetUint64(ctx.GasMeter().GasRemaining()),
+			)
+			if err == nil {
+				ret = response.Ret
+			}
+			return err
+		},
+	}))
+
+	recipient := s.Keyring.GetAddr(1)
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+		To:       &recipient,
+		GasLimit: 500_000,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+
+	response, err := evmKeeper.ApplyTransaction(
+		s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(1_000_000)),
+		tx.GetMsgs()[0].(*types.MsgEthereumTx).AsTransaction(),
+	)
+	s.Require().NoError(err)
+	s.Require().False(response.Failed())
+	s.Require().Len(ret, common.HashLength)
+	s.Require().Equal(byte(0x2a), ret[common.HashLength-1])
+}
+
+func (s *KeeperTestSuite) TestCallEVMViewWithDataDiscardsStateChanges() {
+	s.SetupTest()
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	contract := common.HexToAddress("0x0000000000000000000000000000000000000043")
+	stateDB := statedb.New(s.Network.GetContext(), evmKeeper, statedb.NewEmptyTxConfig())
+	stateDB.SetCode(contract, []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x00}, tracing.CodeChangeUnspecified)
+	s.Require().NoError(stateDB.Commit())
+
+	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(&testHooks{
+		postProcessing: func(ctx sdk.Context, from common.Address, _ core.Message, _ *gethtypes.Receipt) error {
+			_, err := evmKeeper.CallEVMViewWithData(
+				ctx,
+				from,
+				&contract,
+				nil,
+				new(big.Int).SetUint64(ctx.GasMeter().GasRemaining()),
+			)
+			return err
+		},
+	}))
+
+	recipient := s.Keyring.GetAddr(1)
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+		To:       &recipient,
+		GasLimit: 500_000,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+
+	response, err := evmKeeper.ApplyTransaction(
+		s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(1_000_000)),
+		tx.GetMsgs()[0].(*types.MsgEthereumTx).AsTransaction(),
+	)
+	s.Require().NoError(err)
+	s.Require().False(response.Failed())
+	s.Require().Equal(common.Hash{}, evmKeeper.GetState(s.Network.GetContext(), contract, common.Hash{}))
 }
 
 func (s *KeeperTestSuite) TestEstimateGasPreservesPostTxHookRevertData() {

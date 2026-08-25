@@ -42,17 +42,9 @@ func buildPostTxHookContext(ctx sdk.Context, gasLimit uint64) sdk.Context {
 		ctx = ctx.WithContext(context.Background())
 	}
 	return ctx.
-		WithValue(postTxHookContextKey{}, true).
 		WithGasMeter(storetypes.NewGasMeter(gasLimit)).
 		WithKVGasConfig(storetypes.KVGasConfig()).
 		WithTransientKVGasConfig(storetypes.TransientGasConfig())
-}
-
-type postTxHookContextKey struct{}
-
-func isPostTxHookContext(ctx sdk.Context) bool {
-	inHook, _ := ctx.Value(postTxHookContextKey{}).(bool)
-	return inHook
 }
 
 func executePostTxHooks(ctx sdk.Context, gasLimit uint64, run func(sdk.Context) error) (gasUsed uint64, outOfGas bool, err error) {

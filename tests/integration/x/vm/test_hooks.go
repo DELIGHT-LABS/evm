@@ -62,16 +62,12 @@ func (h *NestedEVMGasHook) PostTxProcessing(ctx sdk.Context, from common.Address
 	if err != nil {
 		return err
 	}
-	stateDB := statedb.New(ctx, h.keeper, statedb.NewEmptyTxConfig())
 	before := ctx.GasMeter().GasConsumed()
-	response, err := h.keeper.CallEVMWithData(
+	response, err := h.keeper.CallEVMViewWithData(
 		ctx,
-		stateDB,
 		from,
 		&h.contract,
 		data,
-		false,
-		false,
 		new(big.Int).SetUint64(ctx.GasMeter().GasRemaining()),
 	)
 	if err != nil {
