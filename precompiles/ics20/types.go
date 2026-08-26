@@ -100,6 +100,12 @@ func NewMsgTransfer(method *abi.Method, args []interface{}) (*transfertypes.MsgT
 		return nil, common.Address{}, errorsmod.Wrapf(transfertypes.ErrInvalidAmount, cmn.ErrInvalidAmount, args[3])
 	}
 
+	// The ICS20 precompile requires an explicit amount and does not support the send-all sentinel.
+	transferAmount := math.NewIntFromBigInt(amount)
+	if transferAmount.Equal(transfertypes.UnboundedSpendLimit()) {
+		return nil, common.Address{}, errorsmod.Wrap(transfertypes.ErrInvalidAmount, ErrUnboundedSpendLimit)
+	}
+
 	sender, ok := args[4].(common.Address)
 	if !ok {
 		return nil, common.Address{}, fmt.Errorf(ErrInvalidSender, args[4])
@@ -129,7 +135,7 @@ func NewMsgTransfer(method *abi.Method, args []interface{}) (*transfertypes.MsgT
 	// Use instance to prevent errors on denom or amount
 	token := sdk.Coin{
 		Denom:  denom,
-		Amount: math.NewIntFromBigInt(amount),
+		Amount: transferAmount,
 	}
 
 	msg, err := CreateAndValidateMsgTransfer(sourcePort, sourceChannel, token, sdk.AccAddress(sender.Bytes()).String(), receiver, input.TimeoutHeight, timeoutTimestamp, memo)

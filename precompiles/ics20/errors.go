@@ -13,6 +13,8 @@ const (
 	ErrInvalidTimeoutTimestamp = "invalid timeout timestamp: %d"
 	// ErrInvalidMemo is raised when the memo is invalid.
 	ErrInvalidMemo = "invalid memo: %s"
+	// ErrUnboundedSpendLimit is raised when the transfer amount is the ICS20 unbounded spend limit sentinel.
+	ErrUnboundedSpendLimit = "unbounded spend limit is not supported by the ICS20 precompile"
 	// ErrInvalidHash is raised when the hash is invalid.
 	ErrInvalidHash = "invalid hash: %s"
 	// ErrNoMatchingAllocation is raised when no matching allocation is found.
