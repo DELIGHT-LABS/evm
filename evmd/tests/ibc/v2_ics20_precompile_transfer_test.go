@@ -101,7 +101,7 @@ func (suite *ICS20TransferV2TestSuite) TestHandleMsgTransfer() {
 			},
 		},
 		{
-			"transfer entire balance",
+			"reject unbounded spend limit",
 			func(_ evmibctesting.SenderAccount) {
 				evmAppA := suite.chainA.App.(*evmd.EVMD)
 				sourceDenomToTransfer, err = evmAppA.StakingKeeper.BondDenom(suite.chainA.GetContext())
@@ -172,7 +172,15 @@ func (suite *ICS20TransferV2TestSuite) TestHandleMsgTransfer() {
 			)
 			suite.Require().NoError(err)
 
-			res, _, _, err := suite.chainA.SendEvmTx(senderAccount, senderIdx, suite.chainAPrecompile.Address(), big.NewInt(0), data, 0)
+			res, _, txEvmRes, err := suite.chainA.SendEvmTx(senderAccount, senderIdx, suite.chainAPrecompile.Address(), big.NewInt(0), data, 0)
+			if msgAmount.Equal(transfertypes.UnboundedSpendLimit()) {
+				suite.Require().ErrorContains(err, vm.ErrExecutionReverted.Error())
+				suite.Require().NotNil(txEvmRes)
+				revertErr := chainutil.DecodeRevertReason(*txEvmRes)
+				suite.Require().ErrorContains(revertErr, ics20.ErrUnboundedSpendLimit)
+				suite.Require().Equal(senderBalance, GetBalance(senderAddr))
+				return
+			}
 			suite.Require().NoError(err) // message committed
 			packets, err := pathAToB.EndpointA.ParseV2PacketFromEvent(res.Events)
 			suite.Require().NoError(err)
@@ -180,17 +188,10 @@ func (suite *ICS20TransferV2TestSuite) TestHandleMsgTransfer() {
 
 			// check that the balance for chainA is updated
 			afterSenderBalance := evmAppA.BankKeeper.GetBalance(suite.chainA.GetContext(), senderAddr, originalCoin.Denom)
-			// Note: When an UnboundedSpendLimit value is sent, the spendable amount is used.
-			if msgAmount.Equal(transfertypes.UnboundedSpendLimit()) {
-				transferAmount = senderBalance.Amount
-			}
 			suite.Require().Equal(
 				senderBalance.Amount.Sub(transferAmount).String(),
 				afterSenderBalance.Amount.String(),
 			)
-			if msgAmount.Equal(transfertypes.UnboundedSpendLimit()) {
-				suite.Require().True(afterSenderBalance.IsZero())
-			}
 
 			relayerAddr := suite.chainA.SenderAccounts[0].SenderAccount.GetAddress()
 			relayerBalance := GetBalance(relayerAddr)
