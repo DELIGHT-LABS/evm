@@ -1161,10 +1161,14 @@ func (s *KeeperTestSuite) TestEstimateGasTxTraceIndexMatchesApply() {
 func (s *KeeperTestSuite) TestEstimateGasPlainTransferFinalReprobe() {
 	s.SetupTest()
 
-	var calls int
+	var productionCalls, estimateCalls int
 	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(&testHooks{
 		postProcessing: func(_ sdk.Context, _ common.Address, _ core.Message, _ *gethtypes.Receipt) error {
-			calls++
+			productionCalls++
+			return nil
+		},
+		estimateProcessing: func(_ sdk.Context, _ common.Address, _ core.Message, _ *gethtypes.Receipt) error {
+			estimateCalls++
 			return nil
 		},
 	}))
@@ -1185,8 +1189,33 @@ func (s *KeeperTestSuite) TestEstimateGasPlainTransferFinalReprobe() {
 		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
 	})
 	s.Require().NoError(err)
-	s.Require().Equal(ethparams.TxGas, estimate.Gas)
-	s.Require().Equal(2, calls, "the shortcut result must be proved by a final candidate execution")
+	s.Require().Equal(uint64(ethparams.TxGas), estimate.Gas)
+	s.Require().Zero(productionCalls, "estimation must not call the production hook")
+	s.Require().Equal(2, estimateCalls, "the shortcut result must be proved by a final candidate execution")
+}
+
+func (s *KeeperTestSuite) TestEstimateGasRejectsProductionOnlyHook() {
+	s.SetupTest()
+
+	hook := &productionOnlyHook{}
+	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(hook))
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	zeroGasPrice := hexutil.Big(*big.NewInt(0))
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		GasPrice: &zeroGasPrice,
+	})
+	s.Require().NoError(err)
+
+	_, err = s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	})
+	s.Require().ErrorContains(err, "does not support gas estimation")
+	s.Require().Zero(hook.Calls, "estimation must not fall back to the production hook")
 }
 
 func (s *KeeperTestSuite) TestEstimateGasChargesNestedHookEVMGasExactlyOnce() {

@@ -84,6 +84,13 @@ type EvmHooks interface {
 	PostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error
 }
 
+// EvmHooksEstimator defines the simulation-safe hook path used by gas estimation.
+// Implementations may write to the supplied cached context, but must not perform
+// process-local or external side effects because estimation can execute repeatedly.
+type EvmHooksEstimator interface {
+	EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error
+}
+
 // BankWrapper defines the methods required by the wrapper around
 // the Cosmos SDK x/bank keeper that is used to manage an EVM coin
 // with a configurable value for decimals.

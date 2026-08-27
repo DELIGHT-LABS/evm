@@ -670,10 +670,18 @@ func (s *KeeperTestSuite) TestApplyTransaction() {
 }
 
 type testHooks struct {
-	postProcessing func(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error
+	postProcessing     func(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error
+	estimateProcessing func(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error
 }
 
 func (h *testHooks) PostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error {
+	return h.postProcessing(ctx, sender, msg, receipt)
+}
+
+func (h *testHooks) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error {
+	if h.estimateProcessing != nil {
+		return h.estimateProcessing(ctx, sender, msg, receipt)
+	}
 	return h.postProcessing(ctx, sender, msg, receipt)
 }
 

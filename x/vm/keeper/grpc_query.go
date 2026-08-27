@@ -468,7 +468,7 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 			cfg:       cfg,
 			txConfig:  txConfig,
 			overrides: overrides,
-			commit:    false,
+			simulate:  true,
 		})
 		if candidateErr != nil {
 			if errors.Is(candidateErr, core.ErrIntrinsicGas) || errors.Is(candidateErr, core.ErrFloorDataGas) {

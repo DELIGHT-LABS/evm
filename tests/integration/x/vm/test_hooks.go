@@ -36,6 +36,19 @@ func (dh *FailureHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ core.
 	return errors.New("post tx processing failed")
 }
 
+func (dh *FailureHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
+	return dh.PostTxProcessing(ctx, sender, msg, receipt)
+}
+
+type productionOnlyHook struct {
+	Calls int
+}
+
+func (h *productionOnlyHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ core.Message, _ *ethtypes.Receipt) error {
+	h.Calls++
+	return nil
+}
+
 type hookRevertError struct {
 	data []byte
 }
@@ -49,6 +62,10 @@ type RevertHook struct {
 
 func (h RevertHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ core.Message, _ *ethtypes.Receipt) error {
 	return hookRevertError{data: h.Data}
+}
+
+func (h RevertHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
+	return h.PostTxProcessing(ctx, sender, msg, receipt)
 }
 
 type NestedEVMGasHook struct {
@@ -80,6 +97,10 @@ func (h *NestedEVMGasHook) PostTxProcessing(ctx sdk.Context, from common.Address
 	return nil
 }
 
+func (h *NestedEVMGasHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
+	return h.PostTxProcessing(ctx, sender, msg, receipt)
+}
+
 // txTraceByReceiptIndexHook looks up the candidate tx trace using the receipt
 // index, matching downstream hooks that call GetTxTrace(ctx, receipt.TransactionIndex).
 type txTraceByReceiptIndexHook struct {
@@ -101,6 +122,10 @@ func (h *txTraceByReceiptIndexHook) PostTxProcessing(ctx sdk.Context, _ common.A
 	}
 	h.HookGas = ctx.GasMeter().GasConsumed() - before
 	return nil
+}
+
+func (h *txTraceByReceiptIndexHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
+	return h.PostTxProcessing(ctx, sender, msg, receipt)
 }
 
 func (s *KeeperTestSuite) TestEvmHooks() {

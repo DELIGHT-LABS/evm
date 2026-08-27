@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -238,6 +239,28 @@ func (k *Keeper) PostTxProcessing(
 		return nil
 	}
 	return k.hooks.PostTxProcessing(ctx, sender, msg, receipt)
+}
+
+// estimatePostTxProcessing delegates to the simulation-safe estimation path.
+func (k *Keeper) estimatePostTxProcessing(
+	ctx sdk.Context,
+	sender common.Address,
+	msg core.Message,
+	receipt *ethtypes.Receipt,
+) (err error) {
+	ctx, span := ctx.StartSpan(tracer, "EstimatePostTxProcessing", trace.WithAttributes(
+		attribute.String("sender", sender.Hex()),
+		attribute.String("tx_hash", receipt.TxHash.Hex()),
+	))
+	defer func() { evmtrace.EndSpanErr(span, err) }()
+	if k.hooks == nil {
+		return nil
+	}
+	estimator, ok := k.hooks.(types.EvmHooksEstimator)
+	if !ok {
+		return fmt.Errorf("EVM hooks %T do not support gas estimation", k.hooks)
+	}
+	return estimator.EstimatePostTxProcessing(ctx, sender, msg, receipt)
 }
 
 // HasHooks returns true if hooks are set

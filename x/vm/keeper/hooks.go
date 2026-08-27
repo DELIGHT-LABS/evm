@@ -1,6 +1,8 @@
 package keeper
 
 import (
+	"fmt"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
@@ -18,7 +20,10 @@ import (
 // Event Hooks
 // These can be utilized to customize evm transaction processing.
 
-var _ types.EvmHooks = MultiEvmHooks{}
+var (
+	_ types.EvmHooks          = MultiEvmHooks{}
+	_ types.EvmHooksEstimator = MultiEvmHooks{}
+)
 
 // MultiEvmHooks combine multiple evm hooks, all hook functions are run in array sequence
 type MultiEvmHooks []types.EvmHooks
@@ -38,6 +43,33 @@ func (mh MultiEvmHooks) PostTxProcessing(ctx sdk.Context, sender common.Address,
 	defer func() { evmtrace.EndSpanErr(span, err) }()
 	for i := range mh {
 		if err := mh[i].PostTxProcessing(ctx, sender, msg, receipt); err != nil {
+			return errorsmod.Wrapf(err, "EVM hook %T failed", mh[i])
+		}
+	}
+	return nil
+}
+
+// EstimatePostTxProcessing delegates to the estimation path of every hook.
+// All hooks are checked before execution so estimation never falls back to a
+// production callback or partially executes an unsupported hook chain.
+func (mh MultiEvmHooks) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) (err error) {
+	estimators := make([]types.EvmHooksEstimator, len(mh))
+	for i := range mh {
+		estimator, ok := mh[i].(types.EvmHooksEstimator)
+		if !ok {
+			return fmt.Errorf("EVM hook %T does not support gas estimation", mh[i])
+		}
+		estimators[i] = estimator
+	}
+
+	ctx, span := ctx.StartSpan(tracer, "MultiEVMHooks.EstimatePostTxProcessing", trace.WithAttributes(
+		attribute.String("sender", sender.Hex()),
+		attribute.String("tx_hash", receipt.TxHash.Hex()),
+		attribute.Int("hooks_count", len(mh)),
+	))
+	defer func() { evmtrace.EndSpanErr(span, err) }()
+	for i := range estimators {
+		if err := estimators[i].EstimatePostTxProcessing(ctx, sender, msg, receipt); err != nil {
 			return errorsmod.Wrapf(err, "EVM hook %T failed", mh[i])
 		}
 	}
