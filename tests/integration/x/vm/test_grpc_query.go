@@ -1043,6 +1043,64 @@ func (s *KeeperTestSuite) TestEstimateGasIncludesDeterministicPostTxHookGas() {
 	s.Require().Equal(estimate.Gas, s.Network.App.GetEVMKeeper().GetTransientGasUsed(ctx))
 }
 
+func (s *KeeperTestSuite) TestEstimateGasPostTxHookReceiptTypeMatchesApply() {
+	s.EnableFeemarket = true
+	defer func() { s.EnableFeemarket = false }()
+	s.SetupTest()
+
+	const hookGas = uint64(1_000)
+	var receiptType uint8
+	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(&testHooks{
+		postProcessing: func(ctx sdk.Context, _ common.Address, _ core.Message, receipt *gethtypes.Receipt) error {
+			receiptType = receipt.Type
+			if receipt.Type == gethtypes.DynamicFeeTxType {
+				ctx.GasMeter().ConsumeGas(hookGas, "dynamic fee receipt hook")
+			}
+			return nil
+		},
+	}))
+
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	maxFeePerGas := hexutil.Big(*big.NewInt(ethparams.InitialBaseFee))
+	maxPriorityFeePerGas := hexutil.Big(*big.NewInt(0))
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:                 &sender,
+		To:                   &recipient,
+		MaxFeePerGas:         &maxFeePerGas,
+		MaxPriorityFeePerGas: &maxPriorityFeePerGas,
+	})
+	s.Require().NoError(err)
+
+	estimate, err := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(uint8(gethtypes.DynamicFeeTxType), receiptType)
+	s.Require().Equal(ethparams.TxGas+hookGas, estimate.Gas)
+
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+		To:        &recipient,
+		GasLimit:  estimate.Gas,
+		GasFeeCap: big.NewInt(ethparams.InitialBaseFee),
+		GasTipCap: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	ethTx := tx.GetMsgs()[0].(*types.MsgEthereumTx).AsTransaction()
+	s.Require().Equal(uint8(gethtypes.DynamicFeeTxType), ethTx.Type())
+
+	response, err := s.Network.App.GetEVMKeeper().ApplyTransaction(
+		s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(estimate.Gas*2)),
+		ethTx,
+	)
+	s.Require().NoError(err)
+	s.Require().False(response.Failed())
+	s.Require().Equal(uint8(gethtypes.DynamicFeeTxType), receiptType)
+	s.Require().Equal(estimate.Gas, response.GasUsed)
+}
+
 func (s *KeeperTestSuite) TestEstimateGasTxTraceIndexMatchesApply() {
 	s.SetupTest()
 
