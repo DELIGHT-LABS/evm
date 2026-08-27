@@ -39,6 +39,7 @@ import (
 
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	vestingtypes "github.com/cosmos/cosmos-sdk/x/auth/vesting/types"
 )
@@ -1286,6 +1287,97 @@ func (s *KeeperTestSuite) TestCallEVMViewWithDataClampsGasToParentRemaining() {
 	s.Require().True(response.Failed())
 	s.Require().LessOrEqual(response.GasUsed, parentGasLimit)
 	s.Require().Equal(parentGasLimit, ctx.GasMeter().GasConsumed())
+}
+
+func (s *KeeperTestSuite) TestCallEVMViewWithDataPreservesExplicitGasCapOOG() {
+	s.SetupTest()
+
+	const (
+		parentGasLimit = uint64(100_000)
+		gasCap         = uint64(30_000)
+	)
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	contract := common.HexToAddress("0x0000000000000000000000000000000000000046")
+	stateDB := statedb.New(s.Network.GetContext(), evmKeeper, statedb.NewEmptyTxConfig())
+	stateDB.SetCode(contract, []byte{0x5b, 0x60, 0x00, 0x56}, tracing.CodeChangeUnspecified)
+	s.Require().NoError(stateDB.Commit())
+
+	ctx := s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(parentGasLimit))
+	response, err := evmKeeper.CallEVMViewWithData(
+		ctx,
+		s.Keyring.GetAddr(0),
+		&contract,
+		nil,
+		new(big.Int).SetUint64(gasCap),
+	)
+	s.Require().Error(err)
+	s.Require().NotErrorIs(err, sdkerrors.ErrOutOfGas)
+	s.Require().NotNil(response)
+	s.Require().Equal(vm.ErrOutOfGas.Error(), response.VmError)
+	s.Require().Equal(gasCap, response.GasUsed)
+	s.Require().Equal(gasCap, ctx.GasMeter().GasConsumed())
+}
+
+func (s *KeeperTestSuite) TestCallEVMViewWithDataChargesActualGasOnRevert() {
+	s.SetupTest()
+
+	const parentGasLimit = uint64(100_000)
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	contract := common.HexToAddress("0x0000000000000000000000000000000000000045")
+	stateDB := statedb.New(s.Network.GetContext(), evmKeeper, statedb.NewEmptyTxConfig())
+	stateDB.SetCode(contract, []byte{0x60, 0x00, 0x60, 0x00, 0xfd}, tracing.CodeChangeUnspecified)
+	s.Require().NoError(stateDB.Commit())
+
+	ctx := s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(parentGasLimit))
+	response, err := evmKeeper.CallEVMViewWithData(
+		ctx,
+		s.Keyring.GetAddr(0),
+		&contract,
+		nil,
+		new(big.Int).SetUint64(parentGasLimit),
+	)
+	s.Require().Error(err)
+	s.Require().NotNil(response)
+	s.Require().Equal(vm.ErrExecutionReverted.Error(), response.VmError)
+	s.Require().Less(response.GasUsed, parentGasLimit)
+	s.Require().Equal(response.GasUsed, ctx.GasMeter().GasConsumed())
+}
+
+func (s *KeeperTestSuite) TestApplyTransactionNestedViewIntrinsicGasShortfallIsOutOfGas() {
+	s.SetupTest()
+
+	const gasLimit = uint64(30_000)
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	recipient := s.Keyring.GetAddr(1)
+	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(&testHooks{
+		postProcessing: func(ctx sdk.Context, from common.Address, _ core.Message, _ *gethtypes.Receipt) error {
+			_, err := evmKeeper.CallEVMViewWithData(
+				ctx,
+				from,
+				&recipient,
+				nil,
+				new(big.Int).SetUint64(ctx.GasMeter().GasRemaining()),
+			)
+			return err
+		},
+	}))
+
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+		To:       &recipient,
+		GasLimit: gasLimit,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	ctx := s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(gasLimit * 2))
+	response, err := evmKeeper.ApplyTransaction(ctx, tx.GetMsgs()[0].(*types.MsgEthereumTx).AsTransaction())
+	s.Require().NoError(err)
+	s.Require().True(response.Failed())
+	s.Require().Equal(vm.ErrOutOfGas.Error(), response.VmError)
+	s.Require().Equal(gasLimit, response.GasUsed)
+	s.Require().Equal(gasLimit, ctx.GasMeter().GasConsumed())
 }
 
 func (s *KeeperTestSuite) TestEstimateGasPreservesPostTxHookRevertData() {
