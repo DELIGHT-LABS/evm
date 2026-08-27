@@ -27,7 +27,7 @@ type txCandidateInput struct {
 	cfg       *statedb.EVMConfig
 	txConfig  statedb.TxConfig
 	overrides *rpctypes.StateOverride
-	commit    bool
+	simulate  bool
 }
 
 type txCandidateResult struct {
@@ -61,7 +61,7 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	candidateCtx, commitCandidate := parentCtx.CacheContext()
 	var observed *txCandidateResult
 	defer func() {
-		if observed != nil && input.commit && (observed.hookFailed || observed.outOfGas) {
+		if observed != nil && !input.simulate && (observed.hookFailed || observed.outOfGas) {
 			k.Logger(parentCtx).Error(
 				"tx post processing failed",
 				"tx_hash", input.txConfig.TxHash.Hex(),
@@ -134,6 +134,9 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	persistTxTraceObject(activeCtx, k.objectKey, uint64(input.txConfig.TxIndex), collector)
 	hookLimit := input.msg.GasLimit - result.rawEVMGas
 	hookGas, hookOutOfGas, hookErr := executePostTxHooks(activeCtx, hookLimit, func(hookCtx sdk.Context) error {
+		if input.simulate {
+			return k.estimatePostTxProcessing(hookCtx, input.msg.From, input.msg, receipt)
+		}
 		return k.PostTxProcessing(hookCtx, input.msg.From, input.msg, receipt)
 	})
 	result.hookGas = hookGas
@@ -178,7 +181,7 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 		}
 	}
 
-	if input.commit && !result.hookFailed {
+	if !input.simulate && !result.hookFailed {
 		commitCandidate()
 	}
 	return result, nil
