@@ -432,24 +432,10 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 
 		tmpCtx := ctx
 		if fromType == types.RPC {
-			tmpCtx, _ = ctx.CacheContext()
-
-			acct := k.GetAccount(tmpCtx, msg.From)
-
-			from := msg.From
-			if acct == nil {
-				acc := k.accountKeeper.NewAccountWithAddress(tmpCtx, from[:])
-				k.accountKeeper.SetAccount(tmpCtx, acc)
-				acct = statedb.NewEmptyAccount()
-			}
-			// When submitting a transaction, the `EthIncrementSenderSequence` ante handler increases the account nonce
-			acct.Nonce = nonce + 1
-			err = k.SetAccount(tmpCtx, from, *acct)
+			tmpCtx, err = k.prepareEstimateCandidateContext(ctx, *msg, nonce, hasHooks)
 			if err != nil {
 				return true, nil, err
 			}
-			// resetting the gasMeter after increasing the sequence to have an accurate gas estimation on EVM extensions transactions
-			tmpCtx = buildTraceCtx(tmpCtx, msg.GasLimit)
 		}
 		if !hasHooks {
 			// pass false to not commit StateDB
@@ -579,6 +565,44 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 		}
 	}
 	return &types.EstimateGasResponse{Gas: hi}, nil
+}
+
+func (k *Keeper) prepareEstimateCandidateContext(
+	parentCtx sdk.Context,
+	msg core.Message,
+	nonce uint64,
+	deductFees bool,
+) (sdk.Context, error) {
+	ctx, _ := parentCtx.CacheContext()
+	from := msg.From
+	account := k.GetAccount(ctx, from)
+	if account == nil {
+		newAccount := k.accountKeeper.NewAccountWithAddress(ctx, from[:])
+		k.accountKeeper.SetAccount(ctx, newAccount)
+		account = statedb.NewEmptyAccount()
+	}
+
+	if deductFees {
+		fees := txFeesFromGasPrice(msg.GasLimit, msg.GasPrice, types.GetEVMCoinDenom())
+		if len(fees) > 0 {
+			if err := k.DeductTxCostsFromUserBalance(ctx, fees, from); err != nil {
+				return sdk.Context{}, err
+			}
+			account = k.GetAccount(ctx, from)
+			if account == nil {
+				return sdk.Context{}, fmt.Errorf("failed to prepare estimate account %s", from)
+			}
+		}
+	}
+
+	// EthIncrementSenderSequence runs after fee deduction during transaction delivery.
+	account.Nonce = nonce + 1
+	if err := k.SetAccount(ctx, from, *account); err != nil {
+		return sdk.Context{}, err
+	}
+
+	// Exclude query preparation from the candidate's gas accounting.
+	return buildTraceCtx(ctx, msg.GasLimit), nil
 }
 
 type traceTxConfig struct {
