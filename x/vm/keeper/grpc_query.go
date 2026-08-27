@@ -384,6 +384,7 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 
 	// convert the tx args to an ethereum message
 	msg := args.ToMessage(cfg.BaseFee, true, true)
+	txType := args.TxType(ethtypes.LegacyTxType)
 
 	// Recap the highest gas limit with account's available balance.
 	if msg.GasFeeCap.BitLen() != 0 {
@@ -463,6 +464,7 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 
 		candidate, candidateErr := k.runTxCandidate(tmpCtx, txCandidateInput{
 			msg:       *msg,
+			txType:    txType,
 			cfg:       cfg,
 			txConfig:  txConfig,
 			overrides: overrides,
