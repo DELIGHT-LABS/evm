@@ -1101,6 +1101,72 @@ func (s *KeeperTestSuite) TestEstimateGasPostTxHookReceiptTypeMatchesApply() {
 	s.Require().Equal(estimate.Gas, response.GasUsed)
 }
 
+func (s *KeeperTestSuite) TestEstimateGasAccessListReceiptTypeMatchesApply() {
+	s.EnableFeemarket = true
+	defer func() { s.EnableFeemarket = false }()
+	s.SetupTest()
+
+	var estimateReceiptType, applyReceiptType uint8
+	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(&testHooks{
+		postProcessing: func(_ sdk.Context, _ common.Address, _ core.Message, receipt *gethtypes.Receipt) error {
+			applyReceiptType = receipt.Type
+			return nil
+		},
+		estimateProcessing: func(_ sdk.Context, _ common.Address, _ core.Message, receipt *gethtypes.Receipt) error {
+			estimateReceiptType = receipt.Type
+			return nil
+		},
+	}))
+
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	gasPrice := big.NewInt(ethparams.InitialBaseFee)
+	accessList := gethtypes.AccessList{}
+	gasPriceArg := hexutil.Big(*gasPrice)
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:       &sender,
+		To:         &recipient,
+		GasPrice:   &gasPriceArg,
+		AccessList: &accessList,
+	})
+	s.Require().NoError(err)
+
+	estimate, err := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(uint8(gethtypes.AccessListTxType), estimateReceiptType)
+
+	ethSigner := gethtypes.LatestSignerForChainID(types.GetEthChainConfig().ChainID)
+	msg, err := newSignedEthTx(
+		&gethtypes.AccessListTx{
+			ChainID:    types.GetEthChainConfig().ChainID,
+			GasPrice:   gasPrice,
+			Gas:        estimate.Gas,
+			To:         &recipient,
+			Value:      big.NewInt(0),
+			Data:       nil,
+			AccessList: accessList,
+		},
+		s.Network.App.GetEVMKeeper().GetNonce(s.Network.GetContext(), sender),
+		sdk.AccAddress(sender.Bytes()),
+		tx.NewSigner(s.Keyring.GetPrivKey(0)),
+		ethSigner,
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(uint8(gethtypes.AccessListTxType), msg.AsTransaction().Type())
+
+	response, err := s.Network.App.GetEVMKeeper().ApplyTransaction(
+		s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(estimate.Gas*2)),
+		msg.AsTransaction(),
+	)
+	s.Require().NoError(err)
+	s.Require().False(response.Failed())
+	s.Require().Equal(uint8(gethtypes.AccessListTxType), applyReceiptType)
+}
+
 func (s *KeeperTestSuite) TestEstimateGasTxTraceIndexMatchesApply() {
 	s.SetupTest()
 

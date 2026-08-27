@@ -381,10 +381,12 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 	if err := args.CallDefaults(req.GasCap, cfg.BaseFee, types.GetEthChainConfig().ChainID); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-
 	// convert the tx args to an ethereum message
 	msg := args.ToMessage(cfg.BaseFee, true, true)
 	txType := args.TxType(ethtypes.LegacyTxType)
+	if args.AccessList != nil && args.GasPrice != nil && args.AuthorizationList == nil && args.BlobHashes == nil {
+		txType = ethtypes.AccessListTxType
+	}
 
 	// Recap the highest gas limit with account's available balance.
 	if msg.GasFeeCap.BitLen() != 0 {
