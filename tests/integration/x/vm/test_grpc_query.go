@@ -1284,6 +1284,46 @@ func (s *KeeperTestSuite) TestEstimateGasRejectsProductionOnlyHook() {
 	s.Require().Zero(hook.Calls, "estimation must not fall back to the production hook")
 }
 
+func (s *KeeperTestSuite) TestEstimateGasHookSeesUpfrontFeeDeduction() {
+	s.EnableFeemarket = true
+	defer func() { s.EnableFeemarket = false }()
+	s.SetupTest()
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	startingBalance := evmKeeper.SpendableCoin(s.Network.GetContext(), sender).ToBig()
+	checkBalance := func(ctx sdk.Context, _ common.Address, msg core.Message, _ *gethtypes.Receipt) error {
+		fee := new(big.Int).Mul(new(big.Int).SetUint64(msg.GasLimit), msg.GasPrice)
+		expected := new(big.Int).Sub(startingBalance, fee)
+		actual := evmKeeper.SpendableCoin(ctx, sender).ToBig()
+		if actual.Cmp(expected) != 0 {
+			return fmt.Errorf("hook sender balance %s, expected post-fee balance %s", actual, expected)
+		}
+		return nil
+	}
+	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(&testHooks{
+		postProcessing:     checkBalance,
+		estimateProcessing: checkBalance,
+	}))
+
+	gasPrice := hexutil.Big(*big.NewInt(ethparams.InitialBaseFee))
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		GasPrice: &gasPrice,
+	})
+	s.Require().NoError(err)
+
+	_, err = s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(startingBalance, evmKeeper.SpendableCoin(s.Network.GetContext(), sender).ToBig())
+}
+
 func (s *KeeperTestSuite) TestEstimateGasChargesNestedHookEVMGasExactlyOnce() {
 	s.SetupTest()
 
