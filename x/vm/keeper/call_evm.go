@@ -1,12 +1,14 @@
 package keeper
 
 import (
+	"errors"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
@@ -18,6 +20,7 @@ import (
 	errorsmod "cosmossdk.io/errors"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
 
 // CallEVM performs a smart contract method call using given args.
@@ -104,27 +107,35 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 	return res, nil
 }
 
-// CallEVMViewWithData performs an isolated, non-committing EVM call, caps the
-// execution at the caller's remaining gas, and charges only the EVM execution
-// gas back to the caller's gas meter.
+// CallEVMViewWithData performs an isolated, non-committing EVM call and caps the
+// execution at the caller's remaining gas. It charges actual EVM execution gas
+// back to the caller, or the remaining parent budget when that budget causes OOG.
 func (k *Keeper) CallEVMViewWithData(ctx sdk.Context, from common.Address, contract *common.Address, data []byte, gasCap *big.Int) (_ *types.MsgEthereumTxResponse, err error) {
 	remainingGas := ctx.GasMeter().GasRemaining()
 	if remainingGas == 0 {
 		ctx.GasMeter().ConsumeGas(1, "apply evm message")
 	}
 
-	effectiveGasCap := new(big.Int).SetUint64(remainingGas)
+	effectiveGasCap := new(big.Int).SetUint64(min(remainingGas, config.DefaultGasCap))
 	if gasCap != nil && gasCap.Sign() > 0 && gasCap.Cmp(effectiveGasCap) < 0 {
 		effectiveGasCap.Set(gasCap)
 	}
+	limitedByParent := effectiveGasCap.IsUint64() && effectiveGasCap.Uint64() == remainingGas
 
 	execCtx := buildTraceCtx(ctx, remainingGas)
 	stateDB := statedb.New(execCtx, k, statedb.NewEmptyTxConfig())
 
 	res, err := k.CallEVMWithData(execCtx, stateDB, from, contract, data, false, false, effectiveGasCap)
 	if err != nil {
-		if res != nil && res.Failed() {
-			k.ResetGasMeterAndConsumeGas(ctx, ctx.GasMeter().Limit())
+		parentOutOfGas := limitedByParent &&
+			(res != nil && res.VmError == vm.ErrOutOfGas.Error() ||
+				res == nil && (errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrFloorDataGas)))
+		if parentOutOfGas {
+			ctx.GasMeter().ConsumeGas(remainingGas, "apply evm message")
+			return res, errorsmod.Wrap(sdkerrors.ErrOutOfGas, err.Error())
+		}
+		if res != nil {
+			ctx.GasMeter().ConsumeGas(res.GasUsed, "apply evm message")
 		}
 		return res, err
 	}
