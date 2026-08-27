@@ -222,7 +222,6 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (_ 
 		txType:   tx.Type(),
 		cfg:      cfg,
 		txConfig: txConfig,
-		commit:   true,
 	})
 	if err != nil {
 		// when a transaction contains multiple msg, as long as one of the msg fails
