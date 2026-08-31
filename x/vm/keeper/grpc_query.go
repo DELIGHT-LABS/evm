@@ -369,11 +369,19 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 		return nil, status.Error(codes.Internal, "failed to load evm config")
 	}
 
-	// ApplyMessageWithConfig expect correct nonce set in msg
-	nonce := k.GetNonce(ctx, args.GetFrom())
-	args.Nonce = (*hexutil.Uint64)(&nonce)
-
 	txConfig := statedb.NewEmptyTxConfig()
+	estimateCtx := ctx
+	executionOverrides := overrides
+	if overrides != nil {
+		estimateCtx, executionOverrides, err = k.prepareEstimateSenderOverrides(ctx, args.GetFrom(), overrides, txConfig, hi)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// ApplyMessageWithConfig expects the effective nonce set in msg.
+	nonce := k.GetNonce(estimateCtx, args.GetFrom())
+	args.Nonce = (*hexutil.Uint64)(&nonce)
 
 	if args.Gas == nil {
 		args.Gas = new(hexutil.Uint64)
@@ -389,7 +397,7 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 	if msg.GasFeeCap.BitLen() != 0 {
 		baseDenom := types.GetEVMCoinDenom()
 
-		balance := k.bankWrapper.SpendableCoin(ctx, sdk.AccAddress(args.From.Bytes()), baseDenom)
+		balance := k.bankWrapper.SpendableCoin(estimateCtx, sdk.AccAddress(args.From.Bytes()), baseDenom)
 		available := balance.Amount
 		transfer := "0"
 		if args.Value != nil {
@@ -427,9 +435,9 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 		msg.GasLimit = gas
 		lastCandidate = nil
 
-		tmpCtx := ctx
+		tmpCtx := estimateCtx
 		if fromType == types.RPC {
-			tmpCtx, err = k.prepareEstimateCandidateContext(ctx, *msg, nonce, hasHooks)
+			tmpCtx, err = k.prepareEstimateCandidateContext(estimateCtx, *msg, nonce, hasHooks)
 			if err != nil {
 				return true, nil, err
 			}
@@ -437,7 +445,7 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 		if !hasHooks {
 			// pass false to not commit StateDB
 			stateDB := statedb.New(tmpCtx, &k, txConfig)
-			rsp, err = k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, nil, false, false, cfg, txConfig, false, overrides)
+			rsp, err = k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, nil, false, false, cfg, txConfig, false, executionOverrides)
 			if err != nil {
 				if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrFloorDataGas) {
 					return true, nil, nil // Special case, raise gas limit
@@ -452,7 +460,7 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 			txType:    txType,
 			cfg:       cfg,
 			txConfig:  txConfig,
-			overrides: overrides,
+			overrides: executionOverrides,
 			simulate:  true,
 		})
 		if candidateErr != nil {
@@ -600,6 +608,50 @@ func (k *Keeper) prepareEstimateCandidateContext(
 
 	// Exclude query preparation from the candidate's gas accounting.
 	return buildTraceCtx(ctx, msg.GasLimit), nil
+}
+
+func (k *Keeper) prepareEstimateSenderOverrides(
+	parentCtx sdk.Context,
+	sender common.Address,
+	overrides *rpctypes.StateOverride,
+	txConfig statedb.TxConfig,
+	gasLimit uint64,
+) (sdk.Context, *rpctypes.StateOverride, error) {
+	account, found := (*overrides)[sender]
+	if !found || (account.Balance == nil && account.Nonce == nil) {
+		return parentCtx, overrides, nil
+	}
+
+	// Materialize only the sender fields needed by the simulated ante flow.
+	// Other overrides stay at EVM execution time to preserve their gas semantics.
+	senderOverrides := rpctypes.StateOverride{
+		sender: {
+			Balance: account.Balance,
+			Nonce:   account.Nonce,
+		},
+	}
+	executionOverrides := make(rpctypes.StateOverride, len(*overrides))
+	for address, overrideAccount := range *overrides {
+		if address == sender {
+			overrideAccount.Balance = nil
+			overrideAccount.Nonce = nil
+		}
+		executionOverrides[address] = overrideAccount
+	}
+
+	ctx, _ := parentCtx.CacheContext()
+	ctx = buildTraceCtx(ctx, gasLimit)
+	stateDB := statedb.New(ctx, k, txConfig)
+	blockTime := uint64(ctx.BlockTime().Unix()) // #nosec G115 -- int overflow is not a concern here
+	rules := types.GetEthChainConfig().Rules(big.NewInt(ctx.BlockHeight()), true, blockTime)
+	if _, err := k.applyStateOverrides(ctx, stateDB, rules, &senderOverrides); err != nil {
+		return sdk.Context{}, nil, fmt.Errorf("failed to apply state override: %w", err)
+	}
+	if err := stateDB.Commit(); err != nil {
+		return sdk.Context{}, nil, fmt.Errorf("failed to commit state override: %w", err)
+	}
+
+	return ctx, &executionOverrides, nil
 }
 
 type traceTxConfig struct {

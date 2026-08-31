@@ -366,6 +366,21 @@ func (k *Keeper) ApplyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 	return response, err
 }
 
+func (k *Keeper) applyStateOverrides(ctx sdk.Context, stateDB *statedb.StateDB, rules params.Rules, overrides *rpctypes.StateOverride) (vm.PrecompiledContracts, error) {
+	precompiles := vm.ActivePrecompiledContracts(rules)
+	params := k.GetParams(ctx)
+	for _, precompileAddr := range params.ActiveStaticPrecompiles {
+		address := common.HexToAddress(precompileAddr)
+		if precompile, found := k.precompiles[address]; found {
+			precompiles[address] = precompile
+		}
+	}
+	if err := overrides.Apply(stateDB, precompiles); err != nil {
+		return nil, err
+	}
+	return precompiles, nil
+}
+
 func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateDB, msg core.Message, tracingHooks *tracing.Hooks, commit bool, callFromPrecompile bool, cfg *statedb.EVMConfig, txConfig statedb.TxConfig, internal bool, overrides *rpctypes.StateOverride) (_ *types.MsgEthereumTxResponse, rawEVMGasUsed uint64, err error) {
 	var (
 		ret   []byte // return bytes from evm execution
@@ -388,15 +403,8 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 	// Gas limit suffices for the floor data cost (EIP-7623)
 	rules := ethCfg.Rules(evm.Context.BlockNumber, true, evm.Context.Time)
 	if overrides != nil {
-		precompiles := vm.ActivePrecompiledContracts(rules)
-		params := k.GetParams(ctx)
-		for _, precompileAddr := range params.ActiveStaticPrecompiles {
-			address := common.HexToAddress(precompileAddr)
-			if precompile, found := k.precompiles[address]; found {
-				precompiles[address] = precompile
-			}
-		}
-		if err := overrides.Apply(stateDB, precompiles); err != nil {
+		precompiles, err := k.applyStateOverrides(ctx, stateDB, rules, overrides)
+		if err != nil {
 			return nil, 0, errorsmod.Wrap(err, "failed to apply state override")
 		}
 		evm.WithPrecompiles(precompiles)
