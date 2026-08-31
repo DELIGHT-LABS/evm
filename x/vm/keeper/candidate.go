@@ -7,7 +7,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/tracing"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -77,13 +76,10 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	}()
 	evmCtx := buildTraceCtx(candidateCtx, input.msg.GasLimit)
 
+	evmCtx, tracingHooks := k.prepareTracing(evmCtx, input.msg, input.txConfig, !input.simulate)
 	// tx-wide trace collection (non-consensus; best-effort)
 	collector := newTxTraceCollector()
-	var innerTracer *tracing.Hooks
-	if k.tracer != "" {
-		innerTracer = k.Tracer(evmCtx, input.msg, types.GetEthChainConfig())
-	}
-	wrapperTracer := newTxTraceHooks(innerTracer, collector)
+	wrapperTracer := newTxTraceHooks(tracingHooks, collector)
 	// pass true to commit the StateDB
 	stateDB := statedb.New(evmCtx, k, input.txConfig)
 	response, rawEVMGas, err := k.applyMessageWithConfig(
@@ -119,9 +115,11 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	activeCtx := evmCtx
 	if response.Failed() {
 		// If the tx failed we discard the old context and create a new one, so
-		// PostTxProcessing can persist data even if the tx fails.
+		// PostTxProcessing can persist data even if the tx fails. Preserve the
+		// execution context so post-tx hooks can still access tracer state.
 		candidateCtx, commitCandidate = parentCtx.CacheContext()
-		activeCtx = buildTraceCtx(candidateCtx, input.msg.GasLimit)
+		activeCtx = buildTraceCtx(candidateCtx, input.msg.GasLimit).
+			WithContext(evmCtx.Context())
 	}
 
 	ethLogs := types.LogsToEthereum(response.Logs)

@@ -246,13 +246,10 @@ func (k *Keeper) applyTransactionWithoutHooks(
 	// thus restricted to be used only inside `ApplyMessage`.
 	tmpCtx, commitFn := ctx.CacheContext()
 
+	tmpCtx, tracingHooks := k.prepareTracing(tmpCtx, msg, txConfig, true)
 	// tx-wide trace collection (non-consensus; best-effort)
 	collector := newTxTraceCollector()
-	var innerTracer *tracing.Hooks
-	if k.tracer != "" {
-		innerTracer = k.Tracer(tmpCtx, msg, types.GetEthChainConfig())
-	}
-	wrappedTracer := newTxTraceHooks(innerTracer, collector)
+	wrappedTracer := newTxTraceHooks(tracingHooks, collector)
 	// pass true to commit the StateDB
 	stateDB := statedb.New(tmpCtx, k, txConfig)
 	res, err := k.ApplyMessageWithConfig(tmpCtx, stateDB, msg, wrappedTracer, true, false, cfg, txConfig, false, nil)
