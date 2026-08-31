@@ -1324,6 +1324,60 @@ func (s *KeeperTestSuite) TestEstimateGasHookSeesUpfrontFeeDeduction() {
 	s.Require().Equal(startingBalance, evmKeeper.SpendableCoin(s.Network.GetContext(), sender).ToBig())
 }
 
+func (s *KeeperTestSuite) TestEstimateGasAppliesSenderOverrideBeforeFeeDeduction() {
+	s.EnableFeemarket = true
+	defer func() { s.EnableFeemarket = false }()
+	s.SetupTest()
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	sender := common.HexToAddress("0x0000000000000000000000000000000000000042")
+	recipient := s.Keyring.GetAddr(1)
+	overrideBalance := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	valueInt := big.NewInt(1_000)
+	const overrideNonce uint64 = 7
+	checkOverride := func(ctx sdk.Context, _ common.Address, msg core.Message, _ *gethtypes.Receipt) error {
+		fee := new(big.Int).Mul(new(big.Int).SetUint64(msg.GasLimit), msg.GasPrice)
+		expectedBalance := new(big.Int).Sub(new(big.Int).Set(overrideBalance), fee)
+		expectedBalance.Sub(expectedBalance, valueInt)
+		actualBalance := evmKeeper.SpendableCoin(ctx, sender).ToBig()
+		if actualBalance.Cmp(expectedBalance) != 0 {
+			return fmt.Errorf("hook sender balance %s, expected overridden post-fee balance %s", actualBalance, expectedBalance)
+		}
+		if nonce := evmKeeper.GetNonce(ctx, sender); nonce != overrideNonce+1 {
+			return fmt.Errorf("hook sender nonce %d, expected %d", nonce, overrideNonce+1)
+		}
+		return nil
+	}
+	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(&testHooks{
+		postProcessing:     checkOverride,
+		estimateProcessing: checkOverride,
+	}))
+
+	gasPrice := hexutil.Big(*big.NewInt(ethparams.InitialBaseFee))
+	value := hexutil.Big(*valueInt)
+	argsBz, err := json.Marshal(types.TransactionArgs{
+		From:     &sender,
+		To:       &recipient,
+		Value:    &value,
+		GasPrice: &gasPrice,
+	})
+	s.Require().NoError(err)
+	overrides := []byte(fmt.Sprintf(
+		`{"%s":{"balance":"%s","nonce":"0x%x"}}`,
+		sender.Hex(), hexutil.EncodeBig(overrideBalance), overrideNonce,
+	))
+
+	_, err = s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            argsBz,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+		Overrides:       overrides,
+	})
+	s.Require().NoError(err)
+	s.Require().Zero(evmKeeper.GetNonce(s.Network.GetContext(), sender))
+	s.Require().True(evmKeeper.SpendableCoin(s.Network.GetContext(), sender).IsZero())
+}
+
 func (s *KeeperTestSuite) TestEstimateGasChargesNestedHookEVMGasExactlyOnce() {
 	s.SetupTest()
 
