@@ -275,6 +275,9 @@ func (b *Backend) SetTxDefaults(ctx context.Context, args evmtypes.TransactionAr
 			Value:                args.Value,
 			Data:                 input,
 			AccessList:           args.AccessList,
+			BlobFeeCap:           args.BlobFeeCap,
+			BlobHashes:           args.BlobHashes,
+			AuthorizationList:    args.AuthorizationList,
 			ChainID:              args.ChainID,
 			Nonce:                args.Nonce,
 		}
