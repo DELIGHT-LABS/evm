@@ -205,9 +205,13 @@ func (args *TransactionArgs) TxType(defaultType int) uint8 {
 	case args.AccessList != nil || defaultType == types.AccessListTxType:
 		usedType = types.AccessListTxType
 	}
-	// Make it possible to default to newer tx, but use legacy if gasprice is provided
+	// Make it possible to default to newer tx, but use legacy if gasprice is provided.
+	// An explicit access list still requires an EIP-2930 transaction.
 	if args.GasPrice != nil {
 		usedType = types.LegacyTxType
+		if args.AccessList != nil && args.AuthorizationList == nil && args.BlobHashes == nil {
+			usedType = types.AccessListTxType
+		}
 	}
 	return uint8(usedType)
 }
