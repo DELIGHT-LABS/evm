@@ -113,7 +113,7 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 func (k *Keeper) CallEVMViewWithData(ctx sdk.Context, from common.Address, contract *common.Address, data []byte, gasCap *big.Int) (_ *types.MsgEthereumTxResponse, err error) {
 	remainingGas := ctx.GasMeter().GasRemaining()
 	if remainingGas == 0 {
-		ctx.GasMeter().ConsumeGas(1, "apply evm message")
+		return nil, errorsmod.Wrap(sdkerrors.ErrOutOfGas, "no gas remaining for EVM view call")
 	}
 
 	effectiveGasCap := new(big.Int).SetUint64(min(remainingGas, config.DefaultGasCap))
