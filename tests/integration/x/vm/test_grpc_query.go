@@ -1536,6 +1536,49 @@ func (s *KeeperTestSuite) TestCallEVMViewWithDataClampsGasToParentRemaining() {
 	s.Require().Equal(parentGasLimit, ctx.GasMeter().GasConsumed())
 }
 
+func (s *KeeperTestSuite) TestCallEVMViewWithDataRejectsExhaustedParentGas() {
+	s.SetupTest()
+
+	const gasLimit = uint64(100)
+	testCases := []struct {
+		name  string
+		meter storetypes.GasMeter
+	}{
+		{
+			name:  "finite meter",
+			meter: storetypes.NewGasMeter(gasLimit),
+		},
+		{
+			name:  "limited infinite meter",
+			meter: types.NewInfiniteGasMeterWithLimit(gasLimit),
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			meter := tc.meter
+			meter.ConsumeGas(gasLimit, "exhaust parent gas")
+			ctx := s.Network.GetContext().WithGasMeter(meter)
+			recipient := s.Keyring.GetAddr(1)
+
+			var response *types.MsgEthereumTxResponse
+			var err error
+			s.Require().NotPanics(func() {
+				response, err = s.Network.App.GetEVMKeeper().CallEVMViewWithData(
+					ctx,
+					s.Keyring.GetAddr(0),
+					&recipient,
+					nil,
+					nil,
+				)
+			})
+			s.Require().Nil(response)
+			s.Require().ErrorIs(err, sdkerrors.ErrOutOfGas)
+			s.Require().Equal(gasLimit, meter.GasConsumed())
+		})
+	}
+}
+
 func (s *KeeperTestSuite) TestCallEVMViewWithDataPreservesExplicitGasCapOOG() {
 	s.SetupTest()
 
