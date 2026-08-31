@@ -29,6 +29,7 @@ import (
 	"github.com/cosmos/evm/x/vm/keeper"
 	"github.com/cosmos/evm/x/vm/statedb"
 	vmtracer "github.com/cosmos/evm/x/vm/tracer"
+	vmglobaltracer "github.com/cosmos/evm/x/vm/tracer/global"
 	"github.com/cosmos/evm/x/vm/types"
 
 	sdkmath "cosmossdk.io/math"
@@ -695,6 +696,7 @@ func (s *KeeperTestSuite) TestFailedTransactionPostTxHookRetainsTracingContext()
 
 	evmKeeper := s.Network.App.GetEVMKeeper()
 	evmKeeper.SetGlobalTracerFactories(
+		vmglobaltracer.TxTraceFactory,
 		func(ctx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
 			return ctx.WithValue(factoryContextKey{}, marker), nil
 		},

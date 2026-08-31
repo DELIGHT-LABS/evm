@@ -214,7 +214,7 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (_ 
 	}
 
 	if !k.HasHooks() {
-		return k.applyTransactionWithoutHooks(ctx, *msg, cfg, txConfig)
+		return k.applyTransactionWithoutPostTxHooks(ctx, *msg, cfg, txConfig)
 	}
 
 	result, err := k.runTxCandidate(ctx, txCandidateInput{
@@ -235,24 +235,22 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (_ 
 	return result.response, nil
 }
 
-func (k *Keeper) applyTransactionWithoutHooks(
+func (k *Keeper) applyTransactionWithoutPostTxHooks(
 	ctx sdk.Context,
 	msg core.Message,
 	cfg *statedb.EVMConfig,
 	txConfig statedb.TxConfig,
 ) (*types.MsgEthereumTxResponse, error) {
-	// create a cache context to revert state. The cache context is only committed when both tx and hooks executed successfully.
+	// Create a cache context so failed EVM state changes can be discarded. The
+	// cache is committed only when the transaction succeeds.
 	// Didn't use `Snapshot` because the context stack has exponential complexity on certain operations,
 	// thus restricted to be used only inside `ApplyMessage`.
 	tmpCtx, commitFn := ctx.CacheContext()
 
 	tmpCtx, tracingHooks := k.prepareTracing(tmpCtx, msg, txConfig, true)
-	// tx-wide trace collection (non-consensus; best-effort)
-	collector := newTxTraceCollector()
-	wrappedTracer := newTxTraceHooks(tracingHooks, collector)
 	// pass true to commit the StateDB
 	stateDB := statedb.New(tmpCtx, k, txConfig)
-	res, err := k.ApplyMessageWithConfig(tmpCtx, stateDB, msg, wrappedTracer, true, false, cfg, txConfig, false, nil)
+	res, err := k.ApplyMessageWithConfig(tmpCtx, stateDB, msg, tracingHooks, true, false, cfg, txConfig, false, nil)
 	if err != nil {
 		// when a transaction contains multiple msg, as long as one of the msg fails
 		// all gas will be deducted. so is not msg.Gas()
@@ -267,16 +265,6 @@ func (k *Keeper) applyTransactionWithoutHooks(
 		k.SetTxBloom(tmpCtx, new(big.Int).SetBytes(bloom.Bytes()))
 	}
 
-	if res.Failed() {
-		// If the tx failed we discard the old context and create a new one, so
-		// PostTxProcessing can persist data even if the tx fails.
-		tmpCtx, commitFn = ctx.CacheContext()
-	}
-
-	// Persist tx-wide trace into the currently active cache context so that
-	// PostTxProcessing can read it, and so the failed-tx path (tmpCtx reset)
-	// writes into the correct object store.
-	persistTxTraceObject(tmpCtx, k.objectKey, uint64(txConfig.TxIndex), collector)
 	// If there are no hooks, we can commit the state immediately if the tx is successful
 	if commitFn != nil && !res.Failed() {
 		commitFn()
