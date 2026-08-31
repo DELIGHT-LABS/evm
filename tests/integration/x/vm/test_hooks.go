@@ -12,6 +12,7 @@ import (
 	"github.com/cosmos/evm/contracts"
 	"github.com/cosmos/evm/x/vm/keeper"
 	"github.com/cosmos/evm/x/vm/statedb"
+	vmglobaltracer "github.com/cosmos/evm/x/vm/tracer/global"
 	"github.com/cosmos/evm/x/vm/types"
 
 	sdkmath "cosmossdk.io/math"
@@ -99,7 +100,6 @@ func (h *NestedEVMGasHook) EstimatePostTxProcessing(ctx sdk.Context, sender comm
 // txTraceByReceiptIndexHook looks up the candidate tx trace using the receipt
 // index, matching downstream hooks that call GetTxTrace(ctx, receipt.TransactionIndex).
 type txTraceByReceiptIndexHook struct {
-	keeper       *keeper.Keeper
 	ReceiptIndex uint
 	Touches      int
 	Transfers    int
@@ -109,7 +109,7 @@ type txTraceByReceiptIndexHook struct {
 func (h *txTraceByReceiptIndexHook) PostTxProcessing(ctx sdk.Context, _ common.Address, _ core.Message, receipt *ethtypes.Receipt) error {
 	h.ReceiptIndex = receipt.TransactionIndex
 	before := ctx.GasMeter().GasConsumed()
-	touches, transfers := h.keeper.GetTxTrace(ctx, uint64(receipt.TransactionIndex))
+	touches, transfers := vmglobaltracer.GetTxTrace(ctx, uint64(receipt.TransactionIndex))
 	h.Touches = len(touches)
 	h.Transfers = len(transfers)
 	if h.Touches > 0 {

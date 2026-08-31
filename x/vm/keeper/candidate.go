@@ -77,16 +77,13 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	evmCtx := buildTraceCtx(candidateCtx, input.msg.GasLimit)
 
 	evmCtx, tracingHooks := k.prepareTracing(evmCtx, input.msg, input.txConfig, !input.simulate)
-	// tx-wide trace collection (non-consensus; best-effort)
-	collector := newTxTraceCollector()
-	wrapperTracer := newTxTraceHooks(tracingHooks, collector)
 	// pass true to commit the StateDB
 	stateDB := statedb.New(evmCtx, k, input.txConfig)
 	response, rawEVMGas, err := k.applyMessageWithConfig(
 		evmCtx,
 		stateDB,
 		input.msg,
-		wrapperTracer,
+		tracingHooks,
 		true,
 		false,
 		input.cfg,
@@ -126,10 +123,6 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	receipt := newCandidateReceipt(parentCtx, input, response, ethLogs)
 	result.receipt = receipt
 
-	// Persist tx-wide trace into the currently active cache context so that
-	// PostTxProcessing can read it, and so the failed-tx path (tmpCtx reset)
-	// writes into the correct object store.
-	persistTxTraceObject(activeCtx, k.objectKey, uint64(input.txConfig.TxIndex), collector)
 	hookLimit := input.msg.GasLimit - result.rawEVMGas
 	hookGas, hookOutOfGas, hookErr := executePostTxHooks(activeCtx, hookLimit, func(hookCtx sdk.Context) error {
 		if input.simulate {
