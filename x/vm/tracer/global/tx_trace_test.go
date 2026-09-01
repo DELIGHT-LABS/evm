@@ -29,26 +29,30 @@ func TestTxTraceContext(t *testing.T) {
 		big.NewInt(10),
 	)
 
-	touches, transfers := GetTxTrace(ctx, 7)
+	touches, transfers, erc20Transfers := GetTxTrace(ctx, 7)
 	require.Len(t, touches, 1)
 	require.Len(t, transfers, 1)
+	require.Empty(t, erc20Transfers)
 
-	touches, transfers = GetTxTrace(ctx, 8)
+	touches, transfers, erc20Transfers = GetTxTrace(ctx, 8)
 	require.Nil(t, touches)
 	require.Nil(t, transfers)
+	require.Nil(t, erc20Transfers)
 
-	touches, transfers = GetTxTrace(parent, 7)
+	touches, transfers, erc20Transfers = GetTxTrace(parent, 7)
 	require.Nil(t, touches)
 	require.Nil(t, transfers)
+	require.Nil(t, erc20Transfers)
 }
 
 func TestTxTraceContextWithNilCollector(t *testing.T) {
 	ctx := sdk.Context{}.WithContext(context.Background())
 	ctx = WithCollector(ctx, 0, nil)
 
-	touches, transfers := GetTxTrace(ctx, 0)
+	touches, transfers, erc20Transfers := GetTxTrace(ctx, 0)
 	require.Nil(t, touches)
 	require.Nil(t, transfers)
+	require.Nil(t, erc20Transfers)
 }
 
 func TestTxTraceFactory(t *testing.T) {
@@ -66,7 +70,8 @@ func TestTxTraceFactory(t *testing.T) {
 		big.NewInt(1),
 	)
 
-	touches, transfers := GetTxTrace(ctx, 3)
+	touches, transfers, erc20Transfers := GetTxTrace(ctx, 3)
 	require.Len(t, touches, 1)
 	require.Len(t, transfers, 1)
+	require.Empty(t, erc20Transfers)
 }
