@@ -109,7 +109,7 @@ type txTraceByReceiptIndexHook struct {
 func (h *txTraceByReceiptIndexHook) PostTxProcessing(ctx sdk.Context, _ common.Address, _ core.Message, receipt *ethtypes.Receipt) error {
 	h.ReceiptIndex = receipt.TransactionIndex
 	before := ctx.GasMeter().GasConsumed()
-	touches, transfers := vmglobaltracer.GetTxTrace(ctx, uint64(receipt.TransactionIndex))
+	touches, transfers, _ := vmglobaltracer.GetTxTrace(ctx, uint64(receipt.TransactionIndex))
 	h.Touches = len(touches)
 	h.Transfers = len(transfers)
 	if h.Touches > 0 {
