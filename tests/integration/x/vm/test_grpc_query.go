@@ -1826,7 +1826,7 @@ func (s *KeeperTestSuite) TestEstimateGasCandidateStateIsDiscardedAndHooksSeePos
 				sawPostState = sawPostState || evmKeeper.GetBalance(ctx, recipient).Cmp(recipientBefore) > 0
 			}
 			if len(msg.Data) > 0 {
-				touches, _ := vmglobaltracer.GetTxTrace(ctx, 0)
+				touches, _, _ := vmglobaltracer.GetTxTrace(ctx, 0)
 				sawTrace = sawTrace || len(touches) > 0
 			}
 			beforeMint := s.Network.App.GetBankKeeper().GetBalance(ctx, moduleAddr, mintedDenom)

@@ -15,16 +15,16 @@
 //
 // A post-tx hook running with the execution context can then read its trace:
 //
-//	touches, transfers := vmglobaltracer.GetTxTrace(
+//	touches, transfers, erc20Transfers := vmglobaltracer.GetTxTrace(
 //		ctx,
 //		uint64(receipt.TransactionIndex),
 //	)
 //
 // Applications can replace the built-in collection policy while retaining the
 // standard GetTxTrace result API by implementing global.Collector. A custom
-// collector provides Hooks, Touches, and Transfers; it can decide which calls
-// to retain, how to handle reverted frames, and which value movements qualify
-// as native transfers.
+// collector provides Hooks, Touches, Transfers, and ERC20Transfers; it can
+// decide which calls to retain, how to handle reverted frames, and which value
+// movements qualify as native or ERC20 transfers.
 //
 // The custom collector and its constructor belong to the embedding application:
 //
