@@ -96,6 +96,8 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 		Data:       data,
 		AccessList: ethtypes.AccessList{},
 	}
+	txConfig := statedb.NewEmptyTxConfig()
+	callCtx, tracingHooks := k.prepareCallEVMTracing(callCtx, stateDB, msg, txConfig, commit)
 
 	if stateDB != nil && !callFromPrecompile {
 		stateCtx := stateDB.GetContext()
@@ -106,7 +108,7 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 		}
 	}
 
-	res, err := k.ApplyMessage(callCtx, stateDB, msg, nil, commit, callFromPrecompile, true)
+	res, err := k.ApplyMessage(callCtx, stateDB, msg, tracingHooks, commit, callFromPrecompile, true)
 	if err != nil {
 		return nil, err
 	}
