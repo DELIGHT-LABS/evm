@@ -17,8 +17,9 @@ import (
 // and removed while the execution is in progress, for example by a precompile
 // that needs to observe only the contract call following it.
 type Manager struct {
-	hooks *tracing.Hooks
-	base  *tracing.Hooks
+	hooks       *tracing.Hooks
+	nestedHooks *tracing.Hooks
+	base        *tracing.Hooks
 
 	nextID   uint64
 	globals  []installedHooks
@@ -34,7 +35,10 @@ type installedHooks struct {
 // tracers and may be nil. The returned Hooks pointer remains stable for the
 // lifetime of the manager.
 func New(base *tracing.Hooks) *Manager {
-	m := &Manager{hooks: &tracing.Hooks{}}
+	m := &Manager{
+		hooks:       &tracing.Hooks{},
+		nestedHooks: &tracing.Hooks{},
+	}
 	if base != nil {
 		baseCopy := *base
 		m.base = &baseCopy
@@ -49,6 +53,16 @@ func (m *Manager) Hooks() *tracing.Hooks {
 		return nil
 	}
 	return m.hooks
+}
+
+// NestedHooks returns a stable dispatcher for a nested EVM execution. It
+// dispatches the same call, opcode, and state events as Hooks, but omits the
+// transaction boundary owned by the enclosing execution.
+func (m *Manager) NestedHooks() *tracing.Hooks {
+	if m == nil {
+		return nil
+	}
+	return m.nestedHooks
 }
 
 func (m *Manager) install(tracer Tracer, session bool) func() {
@@ -111,6 +125,9 @@ func (m *Manager) rebuild() {
 
 	composed := compose(ordered)
 	*m.hooks = composed
+	composed.OnTxStart = nil
+	composed.OnTxEnd = nil
+	*m.nestedHooks = composed
 }
 
 func compose(hooks []tracing.Hooks) tracing.Hooks {

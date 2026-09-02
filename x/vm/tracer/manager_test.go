@@ -87,6 +87,42 @@ func TestManagerUpdatesOnlySubscribedCallbacks(t *testing.T) {
 	require.Nil(t, dispatcher.OnOpcode)
 }
 
+func TestManagerNestedHooksOmitTransactionBoundary(t *testing.T) {
+	txStarts := 0
+	txEnds := 0
+	enters := 0
+	manager := New(&tracing.Hooks{
+		OnTxStart: func(_ *tracing.VMContext, _ *ethtypes.Transaction, _ common.Address) {
+			txStarts++
+		},
+		OnTxEnd: func(_ *ethtypes.Receipt, _ error) {
+			txEnds++
+		},
+	})
+	nested := manager.NestedHooks()
+
+	require.NotNil(t, manager.Hooks().OnTxStart)
+	require.NotNil(t, manager.Hooks().OnTxEnd)
+	require.Nil(t, nested.OnTxStart)
+	require.Nil(t, nested.OnTxEnd)
+	require.Nil(t, nested.OnEnter)
+
+	manager.InstallSession(newTestTracer(&tracing.Hooks{
+		OnEnter: func(_ int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
+			enters++
+		},
+	}))
+	require.Same(t, nested, manager.NestedHooks())
+	require.NotNil(t, nested.OnEnter)
+
+	manager.Hooks().OnTxStart(nil, nil, common.Address{})
+	manager.Hooks().OnTxEnd(nil, nil)
+	nested.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+	require.Equal(t, 1, txStarts)
+	require.Equal(t, 1, txEnds)
+	require.Equal(t, 1, enters)
+}
+
 func TestManagerPreservesEveryHookField(t *testing.T) {
 	hooksType := reflect.TypeOf(tracing.Hooks{})
 	hooksValue := reflect.New(hooksType).Elem()
