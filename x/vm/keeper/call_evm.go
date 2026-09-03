@@ -14,11 +14,13 @@ import (
 
 	"github.com/cosmos/evm/server/config"
 	evmtrace "github.com/cosmos/evm/trace"
+	evmante "github.com/cosmos/evm/x/vm/ante"
 	"github.com/cosmos/evm/x/vm/statedb"
 	"github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
 
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
@@ -64,11 +66,6 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 		attribute.Int("data_size", len(data)),
 	))
 	defer func() { evmtrace.EndSpanErr(span, err) }()
-	nonce, err := k.accountKeeper.GetSequence(ctx, from.Bytes())
-	if err != nil {
-		return nil, err
-	}
-
 	gasLimit := config.DefaultGasCap
 	if gasCap != nil && gasCap.Sign() > 0 {
 		if gasCap.BitLen() <= 64 {
@@ -77,6 +74,14 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 				gasLimit = provided
 			}
 		}
+	}
+	callCtx := ctx
+	if !callFromPrecompile {
+		callCtx = evmante.BuildEvmExecutionCtx(ctx)
+	}
+	nonce, err := k.accountKeeper.GetSequence(callCtx, from.Bytes())
+	if err != nil {
+		return nil, err
 	}
 
 	msg := core.Message{
@@ -92,7 +97,16 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 		AccessList: ethtypes.AccessList{},
 	}
 
-	res, err := k.ApplyMessage(ctx, stateDB, msg, nil, commit, callFromPrecompile, true)
+	if stateDB != nil && !callFromPrecompile {
+		stateCtx := stateDB.GetContext()
+		zeroGasConfig := storetypes.GasConfig{}
+		if stateCtx.KVGasConfig() != zeroGasConfig || stateCtx.TransientKVGasConfig() != zeroGasConfig {
+			restoreGasContext := stateDB.OverrideGasContext(buildTraceCtx(stateCtx, gasLimit))
+			defer restoreGasContext()
+		}
+	}
+
+	res, err := k.ApplyMessage(callCtx, stateDB, msg, nil, commit, callFromPrecompile, true)
 	if err != nil {
 		return nil, err
 	}
