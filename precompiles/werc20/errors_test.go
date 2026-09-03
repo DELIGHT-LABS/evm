@@ -2,6 +2,7 @@ package werc20
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,11 +10,13 @@ import (
 
 	cmn "github.com/cosmos/evm/precompiles/common"
 	erc20 "github.com/cosmos/evm/precompiles/erc20"
+	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log/v2"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 )
 
@@ -69,4 +72,13 @@ func TestWERC20WrappedBankSentinelReturnsConcreteParsedError(t *testing.T) {
 		fallbackDefinition := ABI.Errors[fallback]
 		require.NotEqual(t, fallbackDefinition.ID[:4], data[:4])
 	}
+}
+
+func TestWERC20BoundaryPreservationAndEquivalence(t *testing.T) {
+	p := Precompile{Precompile: &erc20.Precompile{ABI: ABI}}
+	t.Run("msg", func(t *testing.T) {
+		adapter := func(ctx sdk.Context, err error) error { return p.werc20MsgError(ctx, "method", err) }
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, "method", true, adapter, errSyntheticWERC20Drift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
 }

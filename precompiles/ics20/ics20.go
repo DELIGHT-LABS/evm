@@ -36,9 +36,6 @@ func init() {
 		panic(err)
 	}
 	cosmosErrorRegistry = cmn.MustNewCosmosErrorRegistry(ABI, ErrorMappings(), cmn.SharedSDKErrorMappings(), nil)
-	if err := cmn.ReviewedGRPCErrorRegistry().ValidateABI(ABI, "ICS20I"); err != nil {
-		panic(err)
-	}
 }
 
 type Precompile struct {

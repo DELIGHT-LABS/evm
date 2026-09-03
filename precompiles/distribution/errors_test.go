@@ -12,11 +12,13 @@ import (
 	"google.golang.org/grpc/status"
 
 	cmn "github.com/cosmos/evm/precompiles/common"
+	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log/v2"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
@@ -39,7 +41,7 @@ func TestTranslateDistributionRegisteredErrorsDirectAndWrapped(t *testing.T) {
 		{fmt.Errorf("dependency wrapper: %w", stakingtypes.ErrNoDelegation), SolidityErrDistributionNoDelegationExists},
 	}
 	for _, tc := range testCases {
-		translated := p.translateDistributionError(ctx, DelegationRewardsMethod, tc.err)
+		translated := p.distributionQueryError(ctx, DelegationRewardsMethod, tc.err)
 		carrier := translated.(cmn.RevertDataCarrier)
 		require.Equal(t, distributionErrorSelector(tc.expected), carrier.RevertData())
 		require.NotEqual(t, distributionErrorSelector(cmn.SolidityErrQueryFailed), carrier.RevertData()[:4])
@@ -83,4 +85,26 @@ func TestTranslateDistributionUnmappedLogsExactlyOnceWithoutReason(t *testing.T)
 func distributionErrorSelector(name string) []byte {
 	definition := ABI.Errors[name]
 	return definition.ID[:4]
+}
+
+func TestDistributionBoundaryPreservation(t *testing.T) {
+	p := Precompile{ABI: ABI}
+	t.Run("query", func(t *testing.T) {
+		precompiletest.TestBoundaryAdapter(t, func(ctx sdk.Context, err error) error { return p.distributionQueryError(ctx, "query", err) })
+	})
+	t.Run("msg", func(t *testing.T) {
+		precompiletest.TestBoundaryAdapter(t, func(ctx sdk.Context, err error) error { return p.distributionMsgError(ctx, "msg", err) })
+	})
+}
+
+func TestDistributionBoundaryEquivalence(t *testing.T) {
+	p := Precompile{ABI: ABI}
+	for _, msg := range []bool{false, true} {
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, "method", msg, func(ctx sdk.Context, err error) error {
+			if msg {
+				return p.distributionMsgError(ctx, "method", err)
+			}
+			return p.distributionQueryError(ctx, "method", err)
+		}, errSyntheticDistributionDrift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	}
 }

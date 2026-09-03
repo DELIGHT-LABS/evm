@@ -6,8 +6,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-func (p Precompile) translateDistributionError(ctx sdk.Context, method string, err error) error {
-	translation := cmn.TranslateCosmosError(p.ABI, cosmosErrorRegistry, err)
+func (p Precompile) logUnmappedDistributionError(ctx sdk.Context, method string, translation cmn.ErrorTranslation) {
 	if translation.IsUnmapped {
 		p.Logger(ctx).Warn(
 			"unmapped registered Cosmos error",
@@ -17,19 +16,16 @@ func (p Precompile) translateDistributionError(ctx sdk.Context, method string, e
 			"code", translation.Key.Code,
 		)
 	}
-	return translation.Revert
 }
 
 func (p Precompile) distributionMsgError(ctx sdk.Context, method string, err error) error {
-	if _, ok := cmn.ExtractCosmosErrorKey(err); ok {
-		return p.translateDistributionError(ctx, method, err)
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrMsgServerFailed, method, err.Error())
+	result := cosmosErrorRegistry.ResolveMsgServerError(nil, method, err)
+	p.logUnmappedDistributionError(ctx, method, result.Translation)
+	return result.Err
 }
 
 func (p Precompile) distributionQueryError(ctx sdk.Context, method string, err error) error {
-	if _, ok := cmn.ExtractCosmosErrorKey(err); ok {
-		return p.translateDistributionError(ctx, method, err)
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrQueryFailed, method, err.Error())
+	result := cosmosErrorRegistry.ResolveQueryError(method, err)
+	p.logUnmappedDistributionError(ctx, method, result.Translation)
+	return result.Err
 }

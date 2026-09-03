@@ -12,6 +12,7 @@ import (
 
 	evmaddress "github.com/cosmos/evm/encoding/address"
 	cmn "github.com/cosmos/evm/precompiles/common"
+	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 	vmtypes "github.com/cosmos/evm/x/vm/types"
 
 	"cosmossdk.io/errors"
@@ -90,4 +91,14 @@ func testDistributionPrecompile(query distributiontypes.QueryServer, msg distrib
 
 func distributionTestContext() sdk.Context {
 	return sdk.Context{}.WithLogger(log.NewNopLogger())
+}
+
+func TestDistributionCustomQueryServerTerminalErrors(t *testing.T) {
+	method := ABI.Methods[ValidatorOutstandingRewardsMethod]
+	validator := sdk.ValAddress(common.HexToAddress("0x100").Bytes()).String()
+	for _, input := range []error{vm.ErrOutOfGas, fmt.Errorf("outer: %w", vm.ErrOutOfGas), precompiletest.StatusRevert{}, fmt.Errorf("outer: %w", precompiletest.StatusRevert{})} {
+		p := testDistributionPrecompile(&distributionQueryServerStub{err: input}, nil)
+		_, err := p.ValidatorOutstandingRewards(distributionTestContext(), nil, &method, []interface{}{validator})
+		require.Equal(t, input, err)
+	}
 }

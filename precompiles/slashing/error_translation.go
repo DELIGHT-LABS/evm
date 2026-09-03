@@ -6,8 +6,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-func (p Precompile) translateSlashingError(ctx sdk.Context, method string, err error) error {
-	translation := cmn.TranslateCosmosError(p.ABI, cosmosErrorRegistry, err)
+func (p Precompile) logUnmappedSlashingError(ctx sdk.Context, method string, translation cmn.ErrorTranslation) {
 	if translation.IsUnmapped {
 		p.Logger(ctx).Warn(
 			"unmapped registered Cosmos error",
@@ -17,19 +16,16 @@ func (p Precompile) translateSlashingError(ctx sdk.Context, method string, err e
 			"code", translation.Key.Code,
 		)
 	}
-	return translation.Revert
 }
 
 func (p Precompile) slashingMsgError(ctx sdk.Context, err error) error {
-	if _, ok := cmn.ExtractCosmosErrorKey(err); ok {
-		return p.translateSlashingError(ctx, UnjailMethod, err)
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrMsgServerFailed, UnjailMethod, err.Error())
+	result := cosmosErrorRegistry.ResolveMsgServerError(nil, UnjailMethod, err)
+	p.logUnmappedSlashingError(ctx, UnjailMethod, result.Translation)
+	return result.Err
 }
 
 func (p Precompile) slashingQueryError(ctx sdk.Context, method string, err error) error {
-	if _, ok := cmn.ExtractCosmosErrorKey(err); ok {
-		return p.translateSlashingError(ctx, method, err)
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrQueryFailed, method, err.Error())
+	result := cosmosErrorRegistry.ResolveQueryError(method, err)
+	p.logUnmappedSlashingError(ctx, method, result.Translation)
+	return result.Err
 }

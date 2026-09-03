@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	cmn "github.com/cosmos/evm/precompiles/common"
+	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 	callbackstypes "github.com/cosmos/evm/x/ibc/callbacks/types"
 	transfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
 	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
@@ -25,6 +26,7 @@ import (
 	"cosmossdk.io/log/v2"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
 
 var errSyntheticICS20Drift = errorsmod.Register("ics20-phase-three-drift", 77, "unstable reason")
@@ -227,4 +229,23 @@ func assertICS20NotFallback(t *testing.T, err error) {
 func ics20ErrorSelector(name string) []byte {
 	definition := ABI.Errors[name]
 	return definition.ID[:4]
+}
+
+func TestICS20BoundaryPreservationAndEquivalence(t *testing.T) {
+	p := Precompile{ABI: ABI}
+	t.Run("query", func(t *testing.T) {
+		adapter := func(ctx sdk.Context, err error) error { return p.ics20QueryError(ctx, "method", err) }
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, "method", false, adapter, errSyntheticICS20Drift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
+	t.Run("msg", func(t *testing.T) {
+		adapter := p.ics20MsgError
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, TransferMethod, true, adapter, errSyntheticICS20Drift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
+	t.Run("validated", func(t *testing.T) {
+		adapter := p.ics20ValidatedInputError
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, TransferMethod, true, adapter, errSyntheticICS20Drift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
 }
