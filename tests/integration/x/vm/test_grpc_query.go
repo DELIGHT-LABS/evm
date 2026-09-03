@@ -1402,7 +1402,11 @@ func (s *KeeperTestSuite) TestCallEVMWithDataPreservesPostTxHookStateDB() {
 	s.SetupTest()
 
 	evmKeeper := s.Network.App.GetEVMKeeper()
-	var ret []byte
+	var (
+		ret              []byte
+		nestedEVMGas     uint64
+		nestedMeterDelta uint64
+	)
 	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(&testHooks{
 		postProcessing: func(ctx sdk.Context, from common.Address, _ core.Message, _ *gethtypes.Receipt) error {
 			contract := common.HexToAddress("0x0000000000000000000000000000000000000042")
@@ -1412,6 +1416,7 @@ func (s *KeeperTestSuite) TestCallEVMWithDataPreservesPostTxHookStateDB() {
 				[]byte{0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3},
 				tracing.CodeChangeUnspecified,
 			)
+			before := ctx.GasMeter().GasConsumed()
 			response, err := evmKeeper.CallEVMWithData(
 				ctx,
 				stateDB,
@@ -1422,8 +1427,10 @@ func (s *KeeperTestSuite) TestCallEVMWithDataPreservesPostTxHookStateDB() {
 				false,
 				new(big.Int).SetUint64(ctx.GasMeter().GasRemaining()),
 			)
+			nestedMeterDelta = ctx.GasMeter().GasConsumed() - before
 			if err == nil {
 				ret = response.Ret
+				nestedEVMGas = response.GasUsed
 			}
 			return err
 		},
@@ -1445,6 +1452,8 @@ func (s *KeeperTestSuite) TestCallEVMWithDataPreservesPostTxHookStateDB() {
 	s.Require().False(response.Failed())
 	s.Require().Len(ret, common.HashLength)
 	s.Require().Equal(byte(0x2a), ret[common.HashLength-1])
+	s.Require().Greater(nestedEVMGas, uint64(0))
+	s.Require().Equal(nestedEVMGas, nestedMeterDelta)
 }
 
 func (s *KeeperTestSuite) TestCallEVMViewWithDataDiscardsStateChanges() {
