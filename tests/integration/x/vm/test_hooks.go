@@ -29,6 +29,10 @@ func (dh *LogRecordHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ cor
 	return nil
 }
 
+func (dh *LogRecordHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
+	return dh.PostTxProcessing(ctx, sender, msg, receipt)
+}
+
 // FailureHook always fail
 type FailureHook struct{}
 
@@ -38,15 +42,6 @@ func (dh *FailureHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ core.
 
 func (dh *FailureHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
 	return dh.PostTxProcessing(ctx, sender, msg, receipt)
-}
-
-type productionOnlyHook struct {
-	Calls int
-}
-
-func (h *productionOnlyHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ core.Message, _ *ethtypes.Receipt) error {
-	h.Calls++
-	return nil
 }
 
 type hookRevertError struct {

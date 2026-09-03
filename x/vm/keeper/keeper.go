@@ -2,7 +2,6 @@ package keeper
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -211,7 +210,7 @@ func (k Keeper) SetTxBloom(ctx sdk.Context, bloom *big.Int) {
 // Hooks
 // ----------------------------------------------------------------------------
 
-// SetHooks sets the hooks for the EVM module
+// SetHooks sets the simulation-safe hooks for the EVM module.
 // Called only once during initialization, panics if called more than once.
 func (k *Keeper) SetHooks(eh types.EvmHooks) *Keeper {
 	if k.hooks != nil {
@@ -256,11 +255,7 @@ func (k *Keeper) estimatePostTxProcessing(
 	if k.hooks == nil {
 		return nil
 	}
-	estimator, ok := k.hooks.(types.EvmHooksEstimator)
-	if !ok {
-		return fmt.Errorf("EVM hooks %T do not support gas estimation", k.hooks)
-	}
-	return estimator.EstimatePostTxProcessing(ctx, sender, msg, receipt)
+	return k.hooks.EstimatePostTxProcessing(ctx, sender, msg, receipt)
 }
 
 // HasHooks returns true if hooks are set

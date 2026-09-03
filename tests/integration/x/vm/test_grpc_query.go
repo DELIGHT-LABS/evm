@@ -1260,30 +1260,6 @@ func (s *KeeperTestSuite) TestEstimateGasPlainTransferFinalReprobe() {
 	s.Require().Equal(2, estimateCalls, "the shortcut result must be proved by a final candidate execution")
 }
 
-func (s *KeeperTestSuite) TestEstimateGasRejectsProductionOnlyHook() {
-	s.SetupTest()
-
-	hook := &productionOnlyHook{}
-	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(hook))
-	sender := s.Keyring.GetAddr(0)
-	recipient := s.Keyring.GetAddr(1)
-	zeroGasPrice := hexutil.Big(*big.NewInt(0))
-	argsBz, err := json.Marshal(types.TransactionArgs{
-		From:     &sender,
-		To:       &recipient,
-		GasPrice: &zeroGasPrice,
-	})
-	s.Require().NoError(err)
-
-	_, err = s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), &types.EthCallRequest{
-		Args:            argsBz,
-		GasCap:          config.DefaultGasCap,
-		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
-	})
-	s.Require().ErrorContains(err, "does not support gas estimation")
-	s.Require().Zero(hook.Calls, "estimation must not fall back to the production hook")
-}
-
 func (s *KeeperTestSuite) TestEstimateGasHookSeesUpfrontFeeDeduction() {
 	s.EnableFeemarket = true
 	defer func() { s.EnableFeemarket = false }()
