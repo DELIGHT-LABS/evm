@@ -10,11 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	cmn "github.com/cosmos/evm/precompiles/common"
+	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log/v2"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 )
 
@@ -72,4 +74,18 @@ func TestSlashingUnmappedLogsExactlyOnceWithoutReason(t *testing.T) {
 func slashingErrorSelector(name string) []byte {
 	definition := ABI.Errors[name]
 	return definition.ID[:4]
+}
+
+func TestSlashingBoundaryPreservationAndEquivalence(t *testing.T) {
+	p := Precompile{ABI: ABI}
+	t.Run("query", func(t *testing.T) {
+		adapter := func(ctx sdk.Context, err error) error { return p.slashingQueryError(ctx, "method", err) }
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, "method", false, adapter, errSyntheticSlashingDrift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
+	t.Run("msg", func(t *testing.T) {
+		adapter := p.slashingMsgError
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, UnjailMethod, true, adapter, errSyntheticSlashingDrift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
 }

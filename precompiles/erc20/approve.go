@@ -48,7 +48,7 @@ func (p Precompile) Approve(
 	allowance, err := p.erc20Keeper.GetAllowance(ctx, p.Address(), owner, spender)
 	if err != nil {
 		if _, registered := cmn.ExtractCosmosErrorKey(err); registered {
-			return nil, p.translateERC20Error(ctx, ApproveMethod, err)
+			return nil, p.erc20QueryError(ctx, ApproveMethod, err)
 		}
 		return nil, cmn.NewRevertWithSolidityError(
 			p.ABI,

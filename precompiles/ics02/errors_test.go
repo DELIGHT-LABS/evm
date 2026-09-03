@@ -10,12 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	cmn "github.com/cosmos/evm/precompiles/common"
+	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
 
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log/v2"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
 
 var errSyntheticICS02Drift = errorsmod.Register("ics02-phase-three-drift", 77, "unstable reason")
@@ -126,4 +128,23 @@ func assertICS02NotFallback(t *testing.T, err error) {
 func ics02ErrorSelector(name string) []byte {
 	definition := ABI.Errors[name]
 	return definition.ID[:4]
+}
+
+func TestICS02BoundaryPreservationAndEquivalence(t *testing.T) {
+	p := Precompile{ABI: ABI}
+	t.Run("query", func(t *testing.T) {
+		adapter := func(ctx sdk.Context, err error) error { return p.ics02QueryError(ctx, "method", err) }
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, "method", false, adapter, errSyntheticICS02Drift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
+	t.Run("keeper", func(t *testing.T) {
+		adapter := func(ctx sdk.Context, err error) error { return p.ics02KeeperError(ctx, "method", err) }
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, "method", true, adapter, errSyntheticICS02Drift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
+	t.Run("validated", func(t *testing.T) {
+		adapter := p.ics02ValidatedInputError
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, UpdateClientMethod, true, adapter, errSyntheticICS02Drift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
 }
