@@ -6,8 +6,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-func (p *Precompile) translateERC20Error(ctx sdk.Context, method string, err error) error {
-	translation := cmn.TranslateCosmosError(p.ABI, cosmosErrorRegistry, err)
+func (p *Precompile) logUnmappedERC20Error(ctx sdk.Context, method string, translation cmn.ErrorTranslation) {
 	if translation.IsUnmapped {
 		ctx.Logger().With("evm extension", "erc20").Warn(
 			"unmapped registered Cosmos error",
@@ -17,19 +16,16 @@ func (p *Precompile) translateERC20Error(ctx sdk.Context, method string, err err
 			"code", translation.Key.Code,
 		)
 	}
-	return translation.Revert
 }
 
 func (p *Precompile) erc20MsgError(ctx sdk.Context, method string, err error) error {
-	if _, ok := cmn.ExtractCosmosErrorKey(err); ok {
-		return p.translateERC20Error(ctx, method, err)
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrMsgServerFailed, method, err.Error())
+	result := cosmosErrorRegistry.ResolveMsgServerError(nil, method, err)
+	p.logUnmappedERC20Error(ctx, method, result.Translation)
+	return result.Err
 }
 
 func (p *Precompile) erc20QueryError(ctx sdk.Context, method string, err error) error {
-	if _, ok := cmn.ExtractCosmosErrorKey(err); ok {
-		return p.translateERC20Error(ctx, method, err)
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrQueryFailed, method, err.Error())
+	result := cosmosErrorRegistry.ResolveQueryError(method, err)
+	p.logUnmappedERC20Error(ctx, method, result.Translation)
+	return result.Err
 }

@@ -1,13 +1,15 @@
 package staking
 
 import (
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	cmn "github.com/cosmos/evm/precompiles/common"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-func (p Precompile) translateStakingError(ctx sdk.Context, method string, err error) error {
-	translation := cmn.TranslateCosmosError(p.ABI, cosmosErrorRegistry, err)
+func (p Precompile) logUnmappedStakingError(ctx sdk.Context, method string, translation cmn.ErrorTranslation) {
 	if translation.IsUnmapped {
 		p.Logger(ctx).Warn(
 			"unmapped registered Cosmos error",
@@ -17,40 +19,34 @@ func (p Precompile) translateStakingError(ctx sdk.Context, method string, err er
 			"code", translation.Key.Code,
 		)
 	}
-	return translation.Revert
-}
-
-func (p Precompile) translateStakingGRPCError(boundary cmn.ErrorBoundary, method string, err error) error {
-	translation := cmn.TranslateGRPCError(p.ABI, cmn.ReviewedGRPCErrorRegistry(), boundary, method, err)
-	return translation.Revert
 }
 
 func (p Precompile) stakingMsgError(ctx sdk.Context, method string, err error) error {
-	grpcTranslation := cmn.TranslateGRPCError(
-		p.ABI,
-		cmn.ReviewedGRPCErrorRegistry(),
-		cmn.ErrorBoundaryMsgServer,
-		method,
-		err,
-	)
-	if grpcTranslation.Matched {
-		return grpcTranslation.Revert
+	if !cmn.NeedsErrorTranslation(err) {
+		return err
 	}
-
-	if _, ok := cmn.ExtractCosmosErrorKey(err); ok {
-		return p.translateStakingError(ctx, method, err)
+	if method == CancelUnbondingDelegationMethod && status.Code(err) == codes.NotFound {
+		return cmn.NewRevertWithSolidityError(p.ABI, SolidityErrStakingUnbondingDelegationNotFound)
 	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrMsgServerFailed, method, err.Error())
+	result := cosmosErrorRegistry.ResolveMsgServerError(nil, method, err)
+	p.logUnmappedStakingError(ctx, method, result.Translation)
+	return result.Err
 }
 
 func (p Precompile) stakingQueryError(ctx sdk.Context, method string, err error) error {
-	if _, ok := cmn.ExtractCosmosErrorKey(err); ok {
-		return p.translateStakingError(ctx, method, err)
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrQueryFailed, method, err.Error())
+	result := cosmosErrorRegistry.ResolveQueryError(method, err)
+	p.logUnmappedStakingError(ctx, method, result.Translation)
+	return result.Err
 }
 
 func stakingQueryPreservesSuccess(method string, err error) bool {
-	disposition, ok := cmn.ReviewedGRPCErrorRegistry().Resolve(cmn.ErrorBoundaryQueryServer, method, err)
-	return ok && disposition.Kind == cmn.GRPCDispositionPreserveSuccess
+	if !cmn.NeedsErrorTranslation(err) {
+		return false
+	}
+	switch method {
+	case DelegationMethod, UnbondingDelegationMethod, ValidatorMethod:
+		return status.Code(err) == codes.NotFound
+	default:
+		return false
+	}
 }

@@ -10,12 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	cmn "github.com/cosmos/evm/precompiles/common"
+	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 	erc20types "github.com/cosmos/evm/x/erc20/types"
 
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log/v2"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 )
 
@@ -89,4 +91,18 @@ func TestERC20UnmappedAndUnregisteredPathsRemainExplicit(t *testing.T) {
 func erc20ErrorSelector(name string) []byte {
 	definition := ABI.Errors[name]
 	return definition.ID[:4]
+}
+
+func TestERC20BoundaryPreservationAndEquivalence(t *testing.T) {
+	p := Precompile{ABI: ABI}
+	t.Run("query", func(t *testing.T) {
+		adapter := func(ctx sdk.Context, err error) error { return p.erc20QueryError(ctx, "method", err) }
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, "method", false, adapter, errSyntheticERC20Drift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
+	t.Run("msg", func(t *testing.T) {
+		adapter := func(ctx sdk.Context, err error) error { return p.erc20MsgError(ctx, "method", err) }
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, "method", true, adapter, errSyntheticERC20Drift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
 }

@@ -6,8 +6,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-func (p Precompile) translateWERC20Error(ctx sdk.Context, method string, err error) error {
-	translation := cmn.TranslateCosmosError(p.ABI, cosmosErrorRegistry, err)
+func (p Precompile) logUnmappedWERC20Error(ctx sdk.Context, method string, translation cmn.ErrorTranslation) {
 	if translation.IsUnmapped {
 		ctx.Logger().With("evm extension", "werc20").Warn(
 			"unmapped registered Cosmos error",
@@ -17,12 +16,10 @@ func (p Precompile) translateWERC20Error(ctx sdk.Context, method string, err err
 			"code", translation.Key.Code,
 		)
 	}
-	return translation.Revert
 }
 
 func (p Precompile) werc20MsgError(ctx sdk.Context, method string, err error) error {
-	if _, ok := cmn.ExtractCosmosErrorKey(err); ok {
-		return p.translateWERC20Error(ctx, method, err)
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrMsgServerFailed, method, err.Error())
+	result := cosmosErrorRegistry.ResolveMsgServerError(nil, method, err)
+	p.logUnmappedWERC20Error(ctx, method, result.Translation)
+	return result.Err
 }
