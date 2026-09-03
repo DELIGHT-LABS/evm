@@ -16,6 +16,7 @@ import (
 
 	evmaddress "github.com/cosmos/evm/encoding/address"
 	cmn "github.com/cosmos/evm/precompiles/common"
+	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 	vmtypes "github.com/cosmos/evm/x/vm/types"
 
 	"cosmossdk.io/log/v2"
@@ -117,6 +118,15 @@ func TestReviewedQueryNotFoundOutcomesIgnoreMessageText(t *testing.T) {
 				}
 				previous = got
 			}
+			input := &abiMethodAndContract{method: methodPointer(tc.method), args: tc.args}
+			// Approved terminal preservation still precedes even a matching message.
+			for _, terminal := range []error{vm.ErrOutOfGas, precompiletest.StatusRevert{}} {
+				returned := fmt.Errorf("not found: %w", terminal)
+				p := testStakingPrecompile(&queryServerStub{err: returned}, nil)
+				got, err := tc.call(p, input)
+				require.Nil(t, got)
+				require.Same(t, returned, err)
+			}
 		})
 	}
 }
@@ -203,4 +213,17 @@ func testStakingPrecompile(query stakingtypes.QueryServer, msg stakingtypes.MsgS
 
 func testContext() sdk.Context {
 	return sdk.Context{}.WithLogger(log.NewNopLogger())
+}
+
+func TestStakingCustomServerTerminalBeforeGRPC(t *testing.T) {
+	caller := common.HexToAddress("0x100")
+	validator := sdk.ValAddress(caller.Bytes()).String()
+	contract := vm.NewContract(caller, common.HexToAddress(vmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
+	for _, input := range []error{precompiletest.StatusRevert{}, precompiletest.StatusOutOfGas{}} {
+		p := testStakingPrecompile(&queryServerStub{err: input}, &msgServerStub{err: input})
+		_, err := p.Delegation(testContext(), contract, methodPointer(DelegationMethod), []interface{}{caller, validator})
+		require.Equal(t, input, err)
+		_, err = p.CancelUnbondingDelegation(testContext(), contract, nil, methodPointer(CancelUnbondingDelegationMethod), []interface{}{caller, validator, big.NewInt(1), big.NewInt(1)})
+		require.Equal(t, input, err)
+	}
 }

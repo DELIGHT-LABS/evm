@@ -38,9 +38,6 @@ func init() {
 		panic(err)
 	}
 	cosmosErrorRegistry = cmn.MustNewCosmosErrorRegistry(ABI, ErrorMappings(), cmn.SharedSDKErrorMappings(), nil)
-	if err := cmn.ReviewedGRPCErrorRegistry().ValidateABI(ABI, "StakingI"); err != nil {
-		panic(err)
-	}
 }
 
 // Precompile defines the precompiled contract for staking.

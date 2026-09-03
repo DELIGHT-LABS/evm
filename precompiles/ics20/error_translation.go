@@ -1,6 +1,9 @@
 package ics20
 
 import (
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	cmn "github.com/cosmos/evm/precompiles/common"
 	host "github.com/cosmos/ibc-go/v11/modules/core/24-host"
 
@@ -14,12 +17,6 @@ func isHostInvalidID(err error) bool {
 
 func invalidSourceChannelError() error {
 	return cmn.NewRevertWithSolidityError(ABI, SolidityErrInvalidSourceChannel, TransferMethod, ErrInvalidSourceChannel)
-}
-
-func (p Precompile) translateICS20Error(ctx sdk.Context, method string, err error) cmn.ErrorTranslation {
-	translation := cmn.TranslateCosmosError(p.ABI, cosmosErrorRegistry, err)
-	p.logUnmappedICS20Error(ctx, method, translation)
-	return translation
 }
 
 func (p Precompile) logUnmappedICS20Error(ctx sdk.Context, method string, translation cmn.ErrorTranslation) {
@@ -36,30 +33,29 @@ func (p Precompile) logUnmappedICS20Error(ctx sdk.Context, method string, transl
 }
 
 func (p Precompile) ics20MsgError(ctx sdk.Context, err error) error {
-	translation := p.translateICS20Error(ctx, TransferMethod, err)
-	if translation.Kind != cmn.MappingKindInternal {
-		return translation.Revert
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrMsgServerFailed, TransferMethod, err.Error())
+	result := cosmosErrorRegistry.ResolveMsgServerError(nil, TransferMethod, err)
+	p.logUnmappedICS20Error(ctx, TransferMethod, result.Translation)
+	return result.Err
 }
 
 func (p Precompile) ics20ValidatedInputError(ctx sdk.Context, err error) error {
-	translation := p.translateICS20Error(ctx, TransferMethod, err)
-	if translation.Kind != cmn.MappingKindInternal {
-		return translation.Revert
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrMsgServerFailed, TransferMethod, err.Error())
+	return p.ics20MsgError(ctx, err)
 }
 
 func (p Precompile) ics20QueryError(ctx sdk.Context, method string, err error) error {
-	translation := p.translateICS20Error(ctx, method, err)
-	if translation.Kind != cmn.MappingKindInternal {
-		return translation.Revert
-	}
-	return cmn.NewRevertWithSolidityError(p.ABI, cmn.SolidityErrQueryFailed, method, err.Error())
+	result := cosmosErrorRegistry.ResolveQueryError(method, err)
+	p.logUnmappedICS20Error(ctx, method, result.Translation)
+	return result.Err
 }
 
 func ics20QueryPreservesSuccess(method string, err error) bool {
-	disposition, ok := cmn.ReviewedGRPCErrorRegistry().Resolve(cmn.ErrorBoundaryQueryServer, method, err)
-	return ok && disposition.Kind == cmn.GRPCDispositionPreserveSuccess
+	if !cmn.NeedsErrorTranslation(err) {
+		return false
+	}
+	switch method {
+	case DenomMethod, DenomHashMethod:
+		return status.Code(err) == codes.NotFound
+	default:
+		return false
+	}
 }

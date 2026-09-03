@@ -12,11 +12,13 @@ import (
 	"google.golang.org/grpc/status"
 
 	cmn "github.com/cosmos/evm/precompiles/common"
+	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log/v2"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 )
 
@@ -30,7 +32,7 @@ func TestTranslateGovRegisteredErrorsDirectAndWrapped(t *testing.T) {
 		errorsmod.Wrap(govtypes.ErrInvalidVote, "message changed"),
 		fmt.Errorf("standard wrapper: %w", govtypes.ErrInvalidVote),
 	} {
-		translated := p.translateGovError(ctx, VoteMethod, err)
+		translated := p.govQueryError(ctx, VoteMethod, err)
 		carrier := translated.(cmn.RevertDataCarrier)
 		require.Equal(t, govErrorSelector(SolidityErrGovInvalidVote), carrier.RevertData())
 		require.NotEqual(t, govErrorSelector(cmn.SolidityErrMsgServerFailed), carrier.RevertData()[:4])
@@ -74,4 +76,18 @@ func TestTranslateGovUnmappedLogsExactlyOnceWithoutReason(t *testing.T) {
 func govErrorSelector(name string) []byte {
 	definition := ABI.Errors[name]
 	return definition.ID[:4]
+}
+
+func TestGovBoundaryPreservationAndEquivalence(t *testing.T) {
+	p := Precompile{ABI: ABI}
+	t.Run("query", func(t *testing.T) {
+		adapter := func(ctx sdk.Context, err error) error { return p.govQueryError(ctx, "method", err) }
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, "method", false, adapter, errSyntheticGovDrift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
+	t.Run("msg", func(t *testing.T) {
+		adapter := func(ctx sdk.Context, err error) error { return p.govMsgError(ctx, "method", err) }
+		precompiletest.TestBoundaryAdapter(t, adapter)
+		precompiletest.TestBoundaryEquivalence(t, ABI, cosmosErrorRegistry, "method", true, adapter, errSyntheticGovDrift, sdkerrors.ErrUnauthorized, errors.New("internal"))
+	})
 }
