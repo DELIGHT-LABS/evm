@@ -78,16 +78,13 @@ type Erc20Keeper interface {
 	GetERC20PrecompileInstance(ctx sdk.Context, address common.Address) (contract vm.PrecompiledContract, found bool, err error)
 }
 
-// EvmHooks event hooks for evm tx processing
+// EvmHooks defines the production and simulation-safe hooks for EVM tx processing.
 type EvmHooks interface {
 	// Must be called after tx is processed successfully, if return an error, the whole transaction is reverted.
 	PostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error
-}
-
-// EvmHooksEstimator defines the simulation-safe hook path used by gas estimation.
-// Implementations may write to the supplied cached context, but must not perform
-// process-local or external side effects because estimation can execute repeatedly.
-type EvmHooksEstimator interface {
+	// EstimatePostTxProcessing is the simulation-safe hook path used by gas estimation.
+	// Implementations may write to the supplied cached context, but must not perform
+	// process-local or external side effects because estimation can execute repeatedly.
 	EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error
 }
 
