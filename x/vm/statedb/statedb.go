@@ -208,6 +208,39 @@ func (s *StateDB) GetContext() sdk.Context {
 	return s.ctx
 }
 
+// OverrideGasContext applies the gas meter and gas configurations from gasCtx to
+// the StateDB contexts and returns a function that restores the original gas
+// context while preserving multistores, event managers, journal, and cache state.
+// The caller must defer the returned restore function.
+func (s *StateDB) OverrideGasContext(gasCtx sdk.Context) func() {
+	originalCtx := s.ctx
+	originalCacheCtx := s.cacheCtx
+	hadCacheCtx := s.writeCache != nil
+
+	s.ctx = withGasContext(s.ctx, gasCtx)
+	if hadCacheCtx {
+		s.cacheCtx = withGasContext(s.cacheCtx, gasCtx)
+	}
+
+	return func() {
+		s.ctx = originalCtx
+		if hadCacheCtx {
+			s.cacheCtx = originalCacheCtx
+		} else if s.writeCache != nil {
+			// A precompile initialized the cache during execution. Keep that cache,
+			// but restore the caller's gas accounting for later use.
+			s.cacheCtx = withGasContext(s.cacheCtx, originalCtx)
+		}
+	}
+}
+
+func withGasContext(ctx, gasCtx sdk.Context) sdk.Context {
+	return ctx.
+		WithGasMeter(gasCtx.GasMeter()).
+		WithKVGasConfig(gasCtx.KVGasConfig()).
+		WithTransientKVGasConfig(gasCtx.TransientKVGasConfig())
+}
+
 // GetCacheContext returns the stateDB CacheContext.
 func (s *StateDB) GetCacheContext() (sdk.Context, error) {
 	if s.writeCache == nil {

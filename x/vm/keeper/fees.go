@@ -124,14 +124,21 @@ func VerifyFee(
 
 	gasTip, _ := ethTx.EffectiveGasTip(baseFee)
 	price := new(big.Int).Add(gasTip, baseFee)
-	gas := new(big.Int).SetUint64(ethTx.Gas())
-	feeAmt := gas.Mul(gas, price)
+	return txFeesFromGasPrice(ethTx.Gas(), price, denom), nil
+}
+
+func txFeesFromGasPrice(gasLimit uint64, gasPrice *big.Int, denom string) sdk.Coins {
+	if gasPrice == nil {
+		return sdk.Coins{}
+	}
+	gas := new(big.Int).SetUint64(gasLimit)
+	feeAmt := gas.Mul(gas, gasPrice)
 	if feeAmt.Sign() == 0 {
 		// zero fee, no need to deduct
-		return sdk.Coins{}, nil
+		return sdk.Coins{}
 	}
 
-	return sdk.Coins{{Denom: denom, Amount: sdkmath.NewIntFromBigInt(feeAmt)}}, nil
+	return sdk.Coins{{Denom: denom, Amount: sdkmath.NewIntFromBigInt(feeAmt)}}
 }
 
 // DeductFees deducts fees from the given account.

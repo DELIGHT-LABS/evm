@@ -708,6 +708,20 @@ func (m *MockEvmHooks) EXPECT() *MockEvmHooksMockRecorder {
 	return m.recorder
 }
 
+// EstimatePostTxProcessing mocks base method.
+func (m *MockEvmHooks) EstimatePostTxProcessing(ctx types.Context, sender common.Address, msg core.Message, receipt *types5.Receipt) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EstimatePostTxProcessing", ctx, sender, msg, receipt)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// EstimatePostTxProcessing indicates an expected call of EstimatePostTxProcessing.
+func (mr *MockEvmHooksMockRecorder) EstimatePostTxProcessing(ctx, sender, msg, receipt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EstimatePostTxProcessing", reflect.TypeOf((*MockEvmHooks)(nil).EstimatePostTxProcessing), ctx, sender, msg, receipt)
+}
+
 // PostTxProcessing mocks base method.
 func (m *MockEvmHooks) PostTxProcessing(ctx types.Context, sender common.Address, msg core.Message, receipt *types5.Receipt) error {
 	m.ctrl.T.Helper()
