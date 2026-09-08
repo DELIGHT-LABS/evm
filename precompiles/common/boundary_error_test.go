@@ -20,17 +20,17 @@ func TestBoundaryErrorResolution(t *testing.T) {
 	cosmos := MustNewCosmosErrorRegistry(api, CosmosErrorMappings{NewCosmosErrorMapping(errMsgServerSynthetic, "PrecompileFailure")}, CosmosErrorMappings{NewCosmosErrorMapping(sdkerrors.ErrUnauthorized, SolidityErrSDKUnauthorized)}, nil)
 	carrier := &testRevertDataCarrier{data: []byte{0xde, 0xad, 0xbe, 0xef, 1}, err: errMsgServerSynthetic}
 	for _, terminal := range []error{nil, vm.ErrOutOfGas, fmt.Errorf("wrapped: %w", vm.ErrOutOfGas), carrier, fmt.Errorf("wrapped: %w", carrier)} {
-		for _, result := range []ErrorResolution{cosmos.ResolveQueryError("query", terminal), cosmos.ResolveMsgServerError(module, "msg", terminal)} {
+		for _, result := range []ErrorResolution{cosmos.ResolveQueryError(api, "query", terminal), cosmos.ResolveMsgServerError(api, module, "msg", terminal)} {
 			require.Equal(t, ErrorTranslation{}, result.Translation)
 			require.Equal(t, terminal, result.Err)
 		}
 	}
 	for _, input := range []error{errMsgServerSynthetic, sdkerrors.ErrUnauthorized, errMsgServerUnmapped, errors.New("internal")} {
 		for _, msg := range []bool{false, true} {
-			result := cosmos.ResolveQueryError("method", input)
+			result := cosmos.ResolveQueryError(api, "method", input)
 			expected := QueryError(api, cosmos, "method", input)
 			if msg {
-				result = cosmos.ResolveMsgServerError(nil, "method", input)
+				result = cosmos.ResolveMsgServerError(api, nil, "method", input)
 				translation := TranslateCosmosError(api, cosmos, input)
 				expected = translation.Revert
 				if translation.Kind == MappingKindInternal {
@@ -38,29 +38,29 @@ func TestBoundaryErrorResolution(t *testing.T) {
 				}
 			}
 			require.Equal(t, expected, result.Err)
-			require.Equal(t, cosmos.Translate(input), result.Translation)
+			require.Equal(t, cosmos.Translate(api, input), result.Translation)
 		}
 	}
 	// A test MsgServer's typed error takes precedence over its registered cause.
 	server := func() error { return msgServerModuleError{cause: errMsgServerSynthetic} }
-	result := cosmos.ResolveMsgServerError(module, "msg", server())
+	result := cosmos.ResolveMsgServerError(api, module, "msg", server())
 	require.Equal(t, ErrorTranslation{}, result.Translation)
 	data, err := ReturnRevertError(&vm.EVM{}, result.Err)
 	require.ErrorIs(t, err, vm.ErrExecutionReverted)
 	require.Equal(t, errorSelector(api, msgServerSolidityErrModuleFailure), data)
-	query := cosmos.ResolveQueryError("query", server())
+	query := cosmos.ResolveQueryError(api, "query", server())
 	require.Equal(t, MappingKindPrecompile, query.Translation.Kind)
 	require.Equal(t, errorSelector(api, "PrecompileFailure"), query.Err.(RevertDataCarrier).RevertData())
-	// Fallbacks also use frozen definitions after the caller mutates the ABI.
-	before := cosmos.ResolveQueryError("query", errors.New("internal"))
-	api.Errors[SolidityErrQueryFailed].Inputs[0].Name = "changed"
+	// Caller ABI changes now affect both the resolver and legacy wrapper.
+	input := errors.New("internal")
+	before := cosmos.ResolveQueryError(api, "query", input)
 	delete(api.Errors, SolidityErrQueryFailed)
-	require.Equal(t, before, cosmos.ResolveQueryError("query", errors.New("internal")))
-	legacy := QueryError(api, cosmos, "query", errors.New("internal"))
-	require.NotEqual(t, before.Err, legacy)
-	beforeMsg := cosmos.ResolveMsgServerError(nil, "msg", errors.New("internal"))
+	after := cosmos.ResolveQueryError(api, "query", input)
+	require.NotEqual(t, before.Err, after.Err)
+	require.Equal(t, QueryError(api, cosmos, "query", input), after.Err)
+	beforeMsg := cosmos.ResolveMsgServerError(api, nil, "msg", input)
 	delete(api.Errors, SolidityErrMsgServerFailed)
-	require.Equal(t, beforeMsg, cosmos.ResolveMsgServerError(nil, "msg", errors.New("internal")))
+	require.NotEqual(t, beforeMsg.Err, cosmos.ResolveMsgServerError(api, nil, "msg", input).Err)
 }
 
 const (
@@ -106,14 +106,14 @@ func (err msgServerCustomAsError) As(target any) bool {
 }
 
 func TestResolveMsgServerErrorPreservesTerminalErrors(t *testing.T) {
-	_, _, cosmosRegistry := newMsgServerErrorTestRegistries(t)
+	api, _, cosmosRegistry := newMsgServerErrorTestRegistries(t)
 
-	require.NoError(t, cosmosRegistry.ResolveMsgServerError(nil, "mint", nil).Err)
-	require.Same(t, vm.ErrOutOfGas, cosmosRegistry.ResolveMsgServerError(nil, "mint", vm.ErrOutOfGas).Err)
+	require.NoError(t, cosmosRegistry.ResolveMsgServerError(api, nil, "mint", nil).Err)
+	require.Same(t, vm.ErrOutOfGas, cosmosRegistry.ResolveMsgServerError(api, nil, "mint", vm.ErrOutOfGas).Err)
 
 	revertData := []byte{0xde, 0xad, 0xbe, 0xef, 0x01, 0x02}
 	wrapped := fmt.Errorf("outer: %w", &testRevertDataCarrier{data: revertData, err: errMsgServerSynthetic})
-	got := cosmosRegistry.ResolveMsgServerError(nil, "mint", wrapped).Err
+	got := cosmosRegistry.ResolveMsgServerError(api, nil, "mint", wrapped).Err
 	require.Same(t, wrapped, got)
 	var carrier RevertDataCarrier
 	require.ErrorAs(t, got, &carrier)
@@ -151,7 +151,7 @@ func TestResolveMsgServerErrorPrefersModuleMappings(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := cosmosRegistry.ResolveMsgServerError(moduleRegistry, "mint", tc.err).Err
+			got := cosmosRegistry.ResolveMsgServerError(moduleABI, moduleRegistry, "mint", tc.err).Err
 			require.Equal(t, errorSelector(moduleABI, tc.errorName), got.(RevertDataCarrier).RevertData())
 		})
 	}
@@ -161,7 +161,7 @@ func TestResolveMsgServerErrorTranslatesCosmosErrors(t *testing.T) {
 	moduleABI, _, cosmosRegistry := newMsgServerErrorTestRegistries(t)
 
 	t.Run("precompile mapping", func(t *testing.T) {
-		got := cosmosRegistry.ResolveMsgServerError(
+		got := cosmosRegistry.ResolveMsgServerError(moduleABI,
 			nil,
 			"mint",
 			errorsmod.Wrap(errMsgServerSynthetic, "diagnostic"),
@@ -170,7 +170,7 @@ func TestResolveMsgServerErrorTranslatesCosmosErrors(t *testing.T) {
 	})
 
 	t.Run("shared SDK mapping", func(t *testing.T) {
-		got := cosmosRegistry.ResolveMsgServerError(
+		got := cosmosRegistry.ResolveMsgServerError(moduleABI,
 			nil,
 			"mint",
 			errorsmod.Wrap(sdkerrors.ErrUnauthorized, "diagnostic"),
@@ -179,7 +179,7 @@ func TestResolveMsgServerErrorTranslatesCosmosErrors(t *testing.T) {
 	})
 
 	t.Run("registered unmapped Cosmos error", func(t *testing.T) {
-		got := cosmosRegistry.ResolveMsgServerError(nil, "mint", errMsgServerUnmapped).Err
+		got := cosmosRegistry.ResolveMsgServerError(moduleABI, nil, "mint", errMsgServerUnmapped).Err
 		data := got.(RevertDataCarrier).RevertData()
 		require.Equal(t, errorSelector(moduleABI, SolidityErrUnmappedCosmosError), data[:4])
 		decoded, err := moduleABI.Errors[SolidityErrUnmappedCosmosError].Inputs.Unpack(data[4:])
@@ -202,7 +202,7 @@ func TestResolveMsgServerErrorHandlesMissingModuleMappings(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			input := errors.New("mint backend unavailable")
-			got := cosmosRegistry.ResolveMsgServerError(tc.moduleRegistry, "mint", input).Err
+			got := cosmosRegistry.ResolveMsgServerError(moduleABI, tc.moduleRegistry, "mint", input).Err
 			data := got.(RevertDataCarrier).RevertData()
 			require.Equal(t, []byte{0x23, 0x7d, 0x7e, 0xdd}, data[:4], "MsgServerFailed(string,string) selector must remain stable")
 			require.Equal(t, errorSelector(moduleABI, SolidityErrMsgServerFailed), data[:4])

@@ -11,37 +11,45 @@ import (
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
 
-func TestCosmosRegistryBoundABIAndLegacyArgument(t *testing.T) {
+func TestCosmosRegistryUsesCallerABI(t *testing.T) {
 	api := mustTestABI(t, msgServerErrorABIJSON)
 	mappings := CosmosErrorMappings{NewCosmosErrorMapping(errMsgServerSynthetic, "PrecompileFailure")}
 	maps.Copy(api.Errors, mustTestABI(t, sharedErrorABIJSON).Errors)
 	registry := MustNewCosmosErrorRegistry(api, mappings, CosmosErrorMappings{NewCosmosErrorMapping(sdkerrors.ErrUnauthorized, SolidityErrSDKUnauthorized)}, nil)
+	// A separately parsed caller ABI must win over the constructor ABI.
+	callerABI := mustTestABI(t, msgServerErrorABIJSON)
+	callerABI.Errors["PrecompileFailure"] = callerABI.Errors["AFailure"]
+	callerResult := registry.Translate(callerABI, errMsgServerSynthetic)
+	require.Equal(t, errorSelector(callerABI, "AFailure"), callerResult.Revert.(RevertDataCarrier).RevertData())
+	require.Equal(t, MappingKindPrecompile, callerResult.Kind)
+	require.Equal(t, errorSelector(api, "PrecompileFailure"), registry.Translate(api, errMsgServerSynthetic).Revert.(RevertDataCarrier).RevertData())
 	inputs := []error{errMsgServerSynthetic, sdkerrors.ErrUnauthorized, errMsgServerUnmapped, errors.New("internal")}
 	expected := make([]ErrorTranslation, len(inputs))
 	for i, input := range inputs {
 		expected[i] = TranslateCosmosError(api, registry, input)
-		require.Equal(t, expected[i], registry.Translate(input))
+		require.Equal(t, expected[i], registry.Translate(api, input))
 	}
 	mappings[0].SolidityError = "AFailure"
 	api.Errors[SolidityErrUnmappedCosmosError].Inputs[0] = abi.Argument{}
 	api.Errors["PrecompileFailure"] = api.Errors["AFailure"]
 	delete(api.Errors, SolidityErrSDKUnauthorized)
-	for i, input := range inputs {
-		require.Equal(t, expected[i], registry.Translate(input))
+	for _, input := range inputs {
+		require.Equal(t, TranslateCosmosError(api, registry, input), registry.Translate(api, input))
 	}
 	// The exported legacy ABI argument remains effective, including mismatched ABI behavior.
 	legacy := TranslateCosmosError(api, registry, errMsgServerSynthetic)
 	require.Equal(t, errorSelector(api, "AFailure"), legacy.Revert.(RevertDataCarrier).RevertData())
 	require.NotEqual(t, expected[0].Revert, legacy.Revert)
-	// A legacy caller can still supply an incomplete ABI; the registry's bound
-	// definitions must not silently replace its generic packing fallback.
+	require.Equal(t, legacy, registry.Translate(api, errMsgServerSynthetic))
+	// A caller can still supply an incomplete ABI; the registry's
+	// initialization ABI must not silently replace its generic packing fallback.
 	delete(api.Errors, SolidityErrUnmappedCosmosError)
 	legacy = TranslateCosmosError(api, registry, errMsgServerUnmapped)
 	require.Equal(t, expected[2].Kind, legacy.Kind)
 	require.Equal(t, expected[2].Key, legacy.Key)
 	require.True(t, legacy.IsUnmapped)
 	require.Equal(t, []byte{0x08, 0xc3, 0x79, 0xa0}, legacy.Revert.(RevertDataCarrier).RevertData()[:4])
-	require.Equal(t, expected[2], registry.Translate(errMsgServerUnmapped))
+	require.Equal(t, legacy, registry.Translate(api, errMsgServerUnmapped))
 }
 
 func TestCosmosRegistryConstructorRejectsMinimalABI(t *testing.T) {
