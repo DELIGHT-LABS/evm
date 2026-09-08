@@ -20,19 +20,19 @@ func (p Precompile) logUnmappedICS02Error(ctx sdk.Context, method string, transl
 }
 
 func (p Precompile) ics02KeeperError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, nil, method, err)
+	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, method, err, nil)
 	p.logUnmappedICS02Error(ctx, method, result.Translation)
 	return result.Err
 }
 
 func (p Precompile) ics02ValidatedInputError(ctx sdk.Context, err error) error {
-	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, nil, UpdateClientMethod, err)
+	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UpdateClientMethod, err, nil)
 	p.logUnmappedICS02Error(ctx, UpdateClientMethod, result.Translation)
 	return result.Err
 }
 
 func (p Precompile) ics02QueryError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveQueryError(p.ABI, method, err)
+	result := cosmosErrorRegistry.ResolveQueryError(p.ABI, method, err, nil)
 	p.logUnmappedICS02Error(ctx, method, result.Translation)
 	return result.Err
 }

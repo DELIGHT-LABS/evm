@@ -474,7 +474,7 @@ func TestStaticRegistryValidatorRejectsSharedABIDrift(t *testing.T) {
 }
 
 func TestStaticRegistryValidatorRequiresBoundaryErrors(t *testing.T) {
-	for _, missing := range []string{SolidityErrQueryFailed, SolidityErrMsgServerFailed, SolidityErrUnmappedCosmosError} {
+	for _, missing := range []string{SolidityErrQueryFailed, SolidityErrMsgServerFailed, SolidityErrEventEmitFailed, SolidityErrUnmappedCosmosError} {
 		t.Run(missing, func(t *testing.T) {
 			contractABI := mustTestABI(t, sharedErrorABIJSON)
 			delete(contractABI.Errors, missing)
@@ -486,7 +486,7 @@ func TestStaticRegistryValidatorRequiresBoundaryErrors(t *testing.T) {
 }
 
 func TestStaticRegistryValidatorRejectsBoundaryPackingDrift(t *testing.T) {
-	for _, name := range []string{SolidityErrQueryFailed, SolidityErrMsgServerFailed, SolidityErrUnmappedCosmosError} {
+	for _, name := range []string{SolidityErrQueryFailed, SolidityErrMsgServerFailed, SolidityErrEventEmitFailed, SolidityErrUnmappedCosmosError} {
 		for _, mutation := range []string{"name", "inputs", "selector"} {
 			t.Run(name+"/"+mutation, func(t *testing.T) {
 				contractABI := mustTestABI(t, sharedErrorABIJSON)
