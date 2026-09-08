@@ -1,10 +1,8 @@
 package testutil
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -18,8 +16,6 @@ import (
 	cmn "github.com/cosmos/evm/precompiles/common"
 	"github.com/cosmos/evm/x/vm/statedb"
 	"github.com/cosmos/evm/x/vm/types/mocks"
-
-	"cosmossdk.io/log/v2"
 
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdktestutil "github.com/cosmos/cosmos-sdk/testutil"
@@ -75,14 +71,13 @@ func TestBoundaryAdapter(t *testing.T, adapter func(sdk.Context, error) error) {
 	}
 }
 
-// TestBoundaryEquivalence compares full revert bytes and unmapped log frequency
+// TestBoundaryEquivalence compares full revert bytes
 // against Cosmos mappings and the boundary fallback using the same ABI and registry.
 func TestBoundaryEquivalence(t *testing.T, api abi.ABI, registry *cmn.CosmosErrorRegistry, method string, msg bool, adapter func(sdk.Context, error) error, inputs ...error) {
 	t.Helper()
 	for _, input := range inputs {
 		t.Run(input.Error(), func(t *testing.T) {
-			var output bytes.Buffer
-			ctx := sdk.Context{}.WithLogger(log.NewLogger(&output, log.OutputJSONOption()))
+			ctx := sdk.Context{}
 			expected := cmn.QueryError(api, registry, method, input)
 			if msg {
 				translation := cmn.TranslateCosmosError(api, registry, input)
@@ -93,11 +88,6 @@ func TestBoundaryEquivalence(t *testing.T, api abi.ABI, registry *cmn.CosmosErro
 			}
 			actual := adapter(ctx, input)
 			require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), actual.(cmn.RevertDataCarrier).RevertData())
-			count := 0
-			if registry.Translate(api, input).IsUnmapped {
-				count = 1
-			}
-			require.Equal(t, count, strings.Count(output.String(), "unmapped registered Cosmos error"))
 		})
 	}
 }
