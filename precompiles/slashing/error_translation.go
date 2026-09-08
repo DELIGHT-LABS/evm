@@ -19,13 +19,13 @@ func (p Precompile) logUnmappedSlashingError(ctx sdk.Context, method string, tra
 }
 
 func (p Precompile) slashingMsgError(ctx sdk.Context, err error) error {
-	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, nil, UnjailMethod, err)
+	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UnjailMethod, err, nil)
 	p.logUnmappedSlashingError(ctx, UnjailMethod, result.Translation)
 	return result.Err
 }
 
 func (p Precompile) slashingQueryError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveQueryError(p.ABI, method, err)
+	result := cosmosErrorRegistry.ResolveQueryError(p.ABI, method, err, nil)
 	p.logUnmappedSlashingError(ctx, method, result.Translation)
 	return result.Err
 }

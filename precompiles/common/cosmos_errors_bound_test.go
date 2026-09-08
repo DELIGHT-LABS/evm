@@ -19,10 +19,10 @@ func TestCosmosRegistryUsesCallerABI(t *testing.T) {
 	// A separately parsed caller ABI must win over the constructor ABI.
 	callerABI := mustTestABI(t, msgServerErrorABIJSON)
 	callerABI.Errors["PrecompileFailure"] = callerABI.Errors["AFailure"]
-	callerResult := registry.Translate(callerABI, errMsgServerSynthetic)
-	require.Equal(t, errorSelector(callerABI, "AFailure"), callerResult.Revert.(RevertDataCarrier).RevertData())
-	require.Equal(t, MappingKindPrecompile, callerResult.Kind)
-	require.Equal(t, errorSelector(api, "PrecompileFailure"), registry.Translate(api, errMsgServerSynthetic).Revert.(RevertDataCarrier).RevertData())
+	callerResult := registry.ResolveError(callerABI, errMsgServerSynthetic, nil, nil)
+	require.Equal(t, errorSelector(callerABI, "AFailure"), callerResult.Err.(RevertDataCarrier).RevertData())
+	require.Equal(t, MappingKindPrecompile, callerResult.Translation.Kind)
+	require.Equal(t, errorSelector(api, "PrecompileFailure"), registry.ResolveError(api, errMsgServerSynthetic, nil, nil).Err.(RevertDataCarrier).RevertData())
 	inputs := []error{errMsgServerSynthetic, sdkerrors.ErrUnauthorized, errMsgServerUnmapped, errors.New("internal")}
 	expected := make([]ErrorTranslation, len(inputs))
 	for i, input := range inputs {
@@ -50,6 +50,9 @@ func TestCosmosRegistryUsesCallerABI(t *testing.T) {
 	require.True(t, legacy.IsUnmapped)
 	require.Equal(t, []byte{0x08, 0xc3, 0x79, 0xa0}, legacy.Revert.(RevertDataCarrier).RevertData()[:4])
 	require.Equal(t, legacy, registry.Translate(api, errMsgServerUnmapped))
+	resolved := registry.ResolveError(api, errMsgServerUnmapped, nil, nil)
+	require.Equal(t, legacy.Revert, resolved.Err)
+	require.Equal(t, legacy, resolved.Translation)
 }
 
 func TestCosmosRegistryConstructorRejectsMinimalABI(t *testing.T) {
