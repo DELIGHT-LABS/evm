@@ -372,7 +372,7 @@ func TranslateCosmosError(moduleABI abi.ABI, registry *CosmosErrorRegistry, err 
 // QueryError preserves terminal EVM errors and existing Solidity revert data,
 // translates registered Cosmos errors, and wraps only internal errors as QueryFailed.
 func QueryError(moduleABI abi.ABI, registry *CosmosErrorRegistry, method string, err error) error {
-	return resolveBoundaryError(moduleABI, nil, registry, SolidityErrQueryFailed, method, err).Err
+	return registry.ResolveError(moduleABI, err, nil, registry.BoundaryFallback(moduleABI, SolidityErrQueryFailed, method, nil)).Err
 }
 
 type ErrorBoundary uint8

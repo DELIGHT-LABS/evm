@@ -33,7 +33,7 @@ func (p Precompile) logUnmappedICS20Error(ctx sdk.Context, method string, transl
 }
 
 func (p Precompile) ics20MsgError(ctx sdk.Context, err error) error {
-	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, nil, TransferMethod, err)
+	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, TransferMethod, err, nil)
 	p.logUnmappedICS20Error(ctx, TransferMethod, result.Translation)
 	return result.Err
 }
@@ -43,7 +43,7 @@ func (p Precompile) ics20ValidatedInputError(ctx sdk.Context, err error) error {
 }
 
 func (p Precompile) ics20QueryError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveQueryError(p.ABI, method, err)
+	result := cosmosErrorRegistry.ResolveQueryError(p.ABI, method, err, nil)
 	p.logUnmappedICS20Error(ctx, method, result.Translation)
 	return result.Err
 }
