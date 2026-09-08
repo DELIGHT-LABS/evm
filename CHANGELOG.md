@@ -12,6 +12,7 @@
 - [\#1181](https://github.com/cosmos/evm/pull/1181) Support state overrides in `debug_traceCall`.
 
 ### BUG FIXES
+- [\#1272](https://github.com/cosmos/evm/pull/1272) Return `null` from `eth_getTransactionReceipt` for unmined txs instead of retrying for up to ~51s, past `json-rpc.http-timeout`.
 - [\#732](https://github.com/cosmos/evm/pull/732) Fix mempool state-read races in integration tests.
 - [\#992](https://github.com/cosmos/evm/pull/992) Respect the provided `gasCap` in `CallEVMWithData` instead of always using the default cap.
 - Sync upstream `release/v0.6.x` through `71c78b507`, including IBC v2 conversion acknowledgements, StateDB balance guards, atomic commits, and balance event amount handling.
