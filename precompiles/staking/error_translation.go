@@ -28,13 +28,13 @@ func (p Precompile) stakingMsgError(ctx sdk.Context, method string, err error) e
 	if method == CancelUnbondingDelegationMethod && status.Code(err) == codes.NotFound {
 		return cmn.NewRevertWithSolidityError(p.ABI, SolidityErrStakingUnbondingDelegationNotFound)
 	}
-	result := cosmosErrorRegistry.ResolveMsgServerError(nil, method, err)
+	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, nil, method, err)
 	p.logUnmappedStakingError(ctx, method, result.Translation)
 	return result.Err
 }
 
 func (p Precompile) stakingQueryError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveQueryError(method, err)
+	result := cosmosErrorRegistry.ResolveQueryError(p.ABI, method, err)
 	p.logUnmappedStakingError(ctx, method, result.Translation)
 	return result.Err
 }

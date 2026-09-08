@@ -263,6 +263,18 @@ func TestQueryError(t *testing.T) {
 	}
 }
 
+func TestQueryErrorWithoutRegistry(t *testing.T) {
+	query := QueryError
+	api := mustTestABI(t, sharedErrorABIJSON)
+	carrier := &testRevertDataCarrier{data: []byte{0xde, 0xad}, err: sdkerrors.ErrUnauthorized}
+	for _, input := range []error{nil, vm.ErrOutOfGas, fmt.Errorf("wrapped: %w", vm.ErrOutOfGas), errors.Join(errors.New("outer"), carrier)} {
+		require.Equal(t, input, query(abi.ABI{}, nil, "query", input))
+	}
+	input := errors.New("internal")
+	require.Equal(t, NewRevertWithSolidityError(api, SolidityErrQueryFailed, "query", input.Error()), query(api, nil, "query", input))
+	require.Equal(t, NewRevertWithSolidityError(abi.ABI{}, SolidityErrQueryFailed, "query", input.Error()), query(abi.ABI{}, nil, "query", input))
+}
+
 func TestCosmosErrorRegistryFreezesDeclarationInputs(t *testing.T) {
 	moduleABI := mustTestABI(t, `[
 		{"type":"error","name":"PrecompileFailure","inputs":[]},

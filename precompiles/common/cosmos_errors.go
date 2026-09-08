@@ -144,9 +144,8 @@ func ApprovedOverrideDeclarations() OverrideDeclarations {
 // CosmosErrorRegistry is the immutable runtime lookup built from validated
 // precompile and shared SDK declaration tiers.
 type CosmosErrorRegistry struct {
-	effectiveABI abi.ABI
-	precompile   map[CosmosErrorKey]CosmosErrorMapping
-	sharedSDK    map[CosmosErrorKey]CosmosErrorMapping
+	precompile map[CosmosErrorKey]CosmosErrorMapping
+	sharedSDK  map[CosmosErrorKey]CosmosErrorMapping
 }
 
 func validateCosmosErrorMappings(
@@ -311,7 +310,7 @@ func ValidateSharedErrorABI(effectiveABI abi.ABI) error {
 }
 
 // MustNewCosmosErrorRegistry validates a precompile ABI and its mappings, then
-// freezes the definitions used at runtime. Invalid initialization panics.
+// retains its mappings. Runtime encoding uses the caller ABI. Invalid setup panics.
 func MustNewCosmosErrorRegistry(
 	effectiveABI abi.ABI,
 	precompileMappings CosmosErrorMappings,
@@ -328,24 +327,7 @@ func MustNewCosmosErrorRegistry(
 	if err := validateBoundaryErrors(effectiveABI); err != nil {
 		panic(err)
 	}
-	// Freeze only definitions used by translation and boundary fallbacks.
-	definitions := make(map[string]abi.Error)
-	snapshot := func(name string) {
-		if definition, ok := effectiveABI.Errors[name]; ok {
-			definition.Inputs = append(abi.Arguments(nil), definition.Inputs...)
-			definitions[name] = definition
-		}
-	}
-	for _, mapping := range precompile {
-		snapshot(mapping.SolidityError)
-	}
-	for _, mapping := range sharedSDK {
-		snapshot(mapping.SolidityError)
-	}
-	snapshot(SolidityErrUnmappedCosmosError)
-	snapshot(SolidityErrQueryFailed)
-	snapshot(SolidityErrMsgServerFailed)
-	return &CosmosErrorRegistry{effectiveABI: abi.ABI{Errors: definitions}, precompile: precompile, sharedSDK: sharedSDK}
+	return &CosmosErrorRegistry{precompile: precompile, sharedSDK: sharedSDK}
 }
 
 type MappingKind uint8
@@ -364,9 +346,9 @@ type ErrorTranslation struct {
 	IsUnmapped bool
 }
 
-// Translate uses the ABI definitions frozen at registry construction.
-func (registry *CosmosErrorRegistry) Translate(err error) ErrorTranslation {
-	return TranslateCosmosError(registry.effectiveABI, registry, err)
+// Translate encodes a Cosmos mapping using the supplied ABI.
+func (registry *CosmosErrorRegistry) Translate(api abi.ABI, err error) ErrorTranslation {
+	return TranslateCosmosError(api, registry, err)
 }
 
 // TranslateCosmosError retains the legacy caller-supplied ABI packing behavior.

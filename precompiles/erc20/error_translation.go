@@ -19,13 +19,13 @@ func (p *Precompile) logUnmappedERC20Error(ctx sdk.Context, method string, trans
 }
 
 func (p *Precompile) erc20MsgError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveMsgServerError(nil, method, err)
+	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, nil, method, err)
 	p.logUnmappedERC20Error(ctx, method, result.Translation)
 	return result.Err
 }
 
 func (p *Precompile) erc20QueryError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveQueryError(method, err)
+	result := cosmosErrorRegistry.ResolveQueryError(p.ABI, method, err)
 	p.logUnmappedERC20Error(ctx, method, result.Translation)
 	return result.Err
 }
