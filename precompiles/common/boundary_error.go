@@ -16,7 +16,7 @@ type ErrorResolution struct {
 }
 
 // validateBoundaryErrors checks the canonical definitions required by boundary
-// resolution before MustNewCosmosErrorRegistry freezes the ABI.
+// resolution during MustNewCosmosErrorRegistry initialization.
 func validateBoundaryErrors(api abi.ABI) error {
 	for _, expected := range []struct{ name, signature string }{
 		{SolidityErrUnmappedCosmosError, "UnmappedCosmosError(string,uint32)"},
@@ -37,14 +37,14 @@ func validateBoundaryErrors(api abi.ABI) error {
 }
 
 // ResolveQueryError applies Cosmos mappings and then QueryFailed.
-func (registry *CosmosErrorRegistry) ResolveQueryError(method string, err error) ErrorResolution {
-	return resolveBoundaryError(registry.effectiveABI, nil, registry, SolidityErrQueryFailed, method, err)
+func (registry *CosmosErrorRegistry) ResolveQueryError(api abi.ABI, method string, err error) ErrorResolution {
+	return resolveBoundaryError(api, nil, registry, SolidityErrQueryFailed, method, err)
 }
 
 // ResolveMsgServerError applies optional typed mappings before Cosmos mappings
 // and MsgServerFailed. A nil module registry skips the typed tier.
-func (registry *CosmosErrorRegistry) ResolveMsgServerError(module *ModuleErrorRegistry, method string, err error) ErrorResolution {
-	return resolveBoundaryError(registry.effectiveABI, module, registry, SolidityErrMsgServerFailed, method, err)
+func (registry *CosmosErrorRegistry) ResolveMsgServerError(api abi.ABI, module *ModuleErrorRegistry, method string, err error) ErrorResolution {
+	return resolveBoundaryError(api, module, registry, SolidityErrMsgServerFailed, method, err)
 }
 
 // NeedsErrorTranslation reports whether an error needs mapping or fallback
