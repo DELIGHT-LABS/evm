@@ -19,7 +19,7 @@ func (p Precompile) logUnmappedWERC20Error(ctx sdk.Context, method string, trans
 }
 
 func (p Precompile) werc20MsgError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveMsgServerError(nil, method, err)
+	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, nil, method, err)
 	p.logUnmappedWERC20Error(ctx, method, result.Translation)
 	return result.Err
 }

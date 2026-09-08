@@ -19,13 +19,13 @@ func (p Precompile) logUnmappedGovError(ctx sdk.Context, method string, translat
 }
 
 func (p Precompile) govMsgError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveMsgServerError(nil, method, err)
+	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, nil, method, err)
 	p.logUnmappedGovError(ctx, method, result.Translation)
 	return result.Err
 }
 
 func (p Precompile) govQueryError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveQueryError(method, err)
+	result := cosmosErrorRegistry.ResolveQueryError(p.ABI, method, err)
 	p.logUnmappedGovError(ctx, method, result.Translation)
 	return result.Err
 }

@@ -94,7 +94,7 @@ func TestBoundaryEquivalence(t *testing.T, api abi.ABI, registry *cmn.CosmosErro
 			actual := adapter(ctx, input)
 			require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), actual.(cmn.RevertDataCarrier).RevertData())
 			count := 0
-			if registry.Translate(input).IsUnmapped {
+			if registry.Translate(api, input).IsUnmapped {
 				count = 1
 			}
 			require.Equal(t, count, strings.Count(output.String(), "unmapped registered Cosmos error"))

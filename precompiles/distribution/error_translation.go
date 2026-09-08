@@ -19,13 +19,13 @@ func (p Precompile) logUnmappedDistributionError(ctx sdk.Context, method string,
 }
 
 func (p Precompile) distributionMsgError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveMsgServerError(nil, method, err)
+	result := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, nil, method, err)
 	p.logUnmappedDistributionError(ctx, method, result.Translation)
 	return result.Err
 }
 
 func (p Precompile) distributionQueryError(ctx sdk.Context, method string, err error) error {
-	result := cosmosErrorRegistry.ResolveQueryError(method, err)
+	result := cosmosErrorRegistry.ResolveQueryError(p.ABI, method, err)
 	p.logUnmappedDistributionError(ctx, method, result.Translation)
 	return result.Err
 }
