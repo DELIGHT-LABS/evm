@@ -44,7 +44,7 @@ func (b *Backend) SendTransaction(ctx context.Context, args evmtypes.Transaction
 	}
 
 	if args.ChainID != nil && (b.EvmChainID).Cmp((*big.Int)(args.ChainID)) != 0 {
-		return common.Hash{}, fmt.Errorf("chainId does not match node's (have=%v, want=%v)", args.ChainID, (*hexutil.Big)(b.EvmChainID))
+		return common.Hash{}, evmtypes.NewChainIDMismatchError(b.EvmChainID, args.ChainID.ToInt())
 	}
 
 	args, err = b.SetTxDefaults(ctx, args)

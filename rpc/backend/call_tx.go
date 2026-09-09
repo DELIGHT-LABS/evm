@@ -104,6 +104,9 @@ func (b *Backend) Resend(ctx context.Context, args evmtypes.TransactionArgs, gas
 func (b *Backend) SendRawTransaction(ctx context.Context, data hexutil.Bytes) (result common.Hash, err error) {
 	ctx, span := tracer.Start(ctx, "SendRawTransaction")
 	defer func() { evmtrace.EndSpanErr(span, err) }()
+	// Normalize after every rejection, including decoding and ValidateBasic.
+	// Geth serializes RPC interfaces on the outermost error only.
+	defer func() { err = resolveTxRejectError(err) }()
 
 	// RLP decode raw transaction bytes
 	tx := &ethtypes.Transaction{}
@@ -121,7 +124,7 @@ func (b *Backend) SendRawTransaction(ctx context.Context, data hexutil.Bytes) (r
 			return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 		}
 		if tx.ChainId().Uint64() != b.EvmChainID.Uint64() {
-			return common.Hash{}, fmt.Errorf("incorrect chain-id; expected %d, got %d", b.EvmChainID, tx.ChainId())
+			return common.Hash{}, evmtypes.NewChainIDMismatchError(b.EvmChainID, tx.ChainId())
 		}
 	}
 
