@@ -64,4 +64,29 @@ const (
 	SolidityErrMsgServerFailed = "MsgServerFailed"
 	// SolidityErrEventEmitFailed is event emit failed
 	SolidityErrEventEmitFailed = "EventEmitFailed"
+
+	// SolidityErrInsufficientFee is insufficient transaction fee.
+	SolidityErrInsufficientFee = "InsufficientFee"
+	// SolidityErrNonceTooLow is a transaction nonce below the account nonce.
+	SolidityErrNonceTooLow = "NonceTooLow"
+	// SolidityErrNonceGap is a transaction nonce rejected by the nonce gap policy.
+	SolidityErrNonceGap = "NonceGap"
+	// SolidityErrIntrinsicGasTooLow is gas below the transaction's intrinsic gas.
+	SolidityErrIntrinsicGasTooLow = "IntrinsicGasTooLow"
+	// SolidityErrFloorDataGasTooLow is gas below the transaction's floor data gas.
+	SolidityErrFloorDataGasTooLow = "FloorDataGasTooLow"
+	// SolidityErrTipAboveFeeCap is a priority fee above the transaction fee cap.
+	SolidityErrTipAboveFeeCap = "TipAboveFeeCap"
+	// SolidityErrFeeCapTooHigh is a transaction fee cap exceeding 256 bits.
+	SolidityErrFeeCapTooHigh = "FeeCapTooHigh"
+	// SolidityErrTipTooHigh is a transaction priority fee exceeding 256 bits.
+	SolidityErrTipTooHigh = "TipTooHigh"
+	// SolidityErrGasPriceTooLow is a gas price below the pool's minimum.
+	SolidityErrGasPriceTooLow = "GasPriceTooLow"
+	// SolidityErrGasLimitExceeded is a transaction gas limit exceeding the block limit.
+	SolidityErrGasLimitExceeded = "GasLimitExceeded"
+	// SolidityErrInvalidSender is an invalid transaction sender signature.
+	SolidityErrInvalidSender = "InvalidSender"
+	// SolidityErrChainIdMismatch is a transaction chain ID differing from the expected ID.
+	SolidityErrChainIdMismatch = "ChainIdMismatch"
 )
