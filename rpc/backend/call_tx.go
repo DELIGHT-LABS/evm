@@ -9,6 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/pkg/errors"
@@ -29,6 +30,7 @@ import (
 func (b *Backend) Resend(ctx context.Context, args evmtypes.TransactionArgs, gasPrice *hexutil.Big, gasLimit *hexutil.Uint64) (result common.Hash, err error) {
 	ctx, span := tracer.Start(ctx, "Resend", trace.WithAttributes(attribute.String("from", args.GetFrom().Hex())))
 	defer func() { evmtrace.EndSpanErr(span, err) }()
+	defer func() { err = resolveTxRejectError(err) }()
 
 	if args.Nonce == nil {
 		return common.Hash{}, fmt.Errorf("missing transaction nonce in transaction spec")
@@ -172,6 +174,7 @@ func (b *Backend) SendRawTransaction(ctx context.Context, data hexutil.Bytes) (r
 func (b *Backend) SetTxDefaults(ctx context.Context, args evmtypes.TransactionArgs) (result evmtypes.TransactionArgs, err error) {
 	ctx, span := tracer.Start(ctx, "SetTxDefaults")
 	defer func() { evmtrace.EndSpanErr(span, err) }()
+	defer func() { err = resolveTxRejectError(err) }()
 
 	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
 		return args, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
@@ -204,7 +207,7 @@ func (b *Backend) SetTxDefaults(ctx context.Context, args evmtypes.TransactionAr
 			}
 
 			if args.MaxFeePerGas.ToInt().Cmp(args.MaxPriorityFeePerGas.ToInt()) < 0 {
-				return args, fmt.Errorf("maxFeePerGas (%v) < maxPriorityFeePerGas (%v)", args.MaxFeePerGas, args.MaxPriorityFeePerGas)
+				return args, core.ErrTipAboveFeeCap
 			}
 		} else {
 			if args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil {
@@ -228,7 +231,7 @@ func (b *Backend) SetTxDefaults(ctx context.Context, args evmtypes.TransactionAr
 	} else {
 		// Both maxPriorityfee and maxFee set by caller. Sanity-check their internal relation
 		if args.MaxFeePerGas.ToInt().Cmp(args.MaxPriorityFeePerGas.ToInt()) < 0 {
-			return args, fmt.Errorf("maxFeePerGas (%v) < maxPriorityFeePerGas (%v)", args.MaxFeePerGas, args.MaxPriorityFeePerGas)
+			return args, core.ErrTipAboveFeeCap
 		}
 	}
 
@@ -314,6 +317,7 @@ func (b *Backend) EstimateGas(
 	}
 	ctx, span := tracer.Start(ctx, "EstimateGas", trace.WithAttributes(attribute.String("from", args.GetFrom().Hex()), attribute.String("to", toAddr)))
 	defer func() { evmtrace.EndSpanErr(span, err) }()
+	defer func() { err = resolveTxRejectError(err) }()
 
 	blockNr := rpctypes.EthPendingBlockNumber
 	if blockNrOrHash != nil {
@@ -357,9 +361,10 @@ func (b *Backend) EstimateGas(
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
+	ctx = rpctypes.WithQueryErrorCapture(ctx)
 	res, err := b.QueryClient.EstimateGas(ctx, &req)
 	if err != nil {
-		return 0, err
+		return 0, rpctypes.FromQueryError(ctx, err)
 	}
 	if err = handleRevertError(res.VmError, res.Ret); err != nil {
 		return 0, err
@@ -381,6 +386,7 @@ func (b *Backend) DoCall(
 	}
 	ctx, span := tracer.Start(ctx, "DoCall", trace.WithAttributes(attribute.String("from", args.GetFrom().Hex()), attribute.String("to", toAddr), attribute.Int64("blockNr", blockNr.Int64())))
 	defer func() { evmtrace.EndSpanErr(span, err) }()
+	defer func() { err = resolveTxRejectError(err) }()
 
 	bz, err := json.Marshal(&args)
 	if err != nil {
@@ -414,9 +420,10 @@ func (b *Backend) DoCall(
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
+	ctx = rpctypes.WithQueryErrorCapture(ctx)
 	res, err := b.QueryClient.EthCall(ctx, &req)
 	if err != nil {
-		return nil, err
+		return nil, rpctypes.FromQueryError(ctx, err)
 	}
 
 	if err = handleRevertError(res.VmError, res.Ret); err != nil {
