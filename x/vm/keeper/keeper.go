@@ -210,7 +210,7 @@ func (k Keeper) SetTxBloom(ctx sdk.Context, bloom *big.Int) {
 // Hooks
 // ----------------------------------------------------------------------------
 
-// SetHooks sets the hooks for the EVM module
+// SetHooks sets the simulation-safe hooks for the EVM module.
 // Called only once during initialization, panics if called more than once.
 func (k *Keeper) SetHooks(eh types.EvmHooks) *Keeper {
 	if k.hooks != nil {
@@ -238,6 +238,24 @@ func (k *Keeper) PostTxProcessing(
 		return nil
 	}
 	return k.hooks.PostTxProcessing(ctx, sender, msg, receipt)
+}
+
+// estimatePostTxProcessing delegates to the simulation-safe estimation path.
+func (k *Keeper) estimatePostTxProcessing(
+	ctx sdk.Context,
+	sender common.Address,
+	msg core.Message,
+	receipt *ethtypes.Receipt,
+) (err error) {
+	ctx, span := ctx.StartSpan(tracer, "EstimatePostTxProcessing", trace.WithAttributes(
+		attribute.String("sender", sender.Hex()),
+		attribute.String("tx_hash", receipt.TxHash.Hex()),
+	))
+	defer func() { evmtrace.EndSpanErr(span, err) }()
+	if k.hooks == nil {
+		return nil
+	}
+	return k.hooks.EstimatePostTxProcessing(ctx, sender, msg, receipt)
 }
 
 // HasHooks returns true if hooks are set

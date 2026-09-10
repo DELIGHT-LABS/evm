@@ -15,8 +15,11 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/cosmos/evm/x/vm/statedb"
+	"github.com/cosmos/evm/x/vm/types"
 	"github.com/cosmos/evm/x/vm/types/mocks"
 
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
+	sdktestutil "github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
@@ -630,6 +633,82 @@ func (suite *StateDBTestSuite) TestSetStorage() {
 			tc.assert(db)
 		})
 	}
+}
+
+func (suite *StateDBTestSuite) TestOverrideGasContext() {
+	key := storetypes.NewKVStoreKey("gas-context")
+	transientKey := storetypes.NewTransientStoreKey("gas-context-transient")
+	originalMeter := storetypes.NewGasMeter(1_000)
+	originalCtx := sdktestutil.DefaultContext(key, transientKey).
+		WithGasMeter(originalMeter).
+		WithKVGasConfig(storetypes.KVGasConfig()).
+		WithTransientKVGasConfig(storetypes.TransientGasConfig())
+	isolationMeter := types.NewInfiniteGasMeterWithLimit(500)
+	isolationCtx := originalCtx.
+		WithGasMeter(isolationMeter).
+		WithKVGasConfig(storetypes.GasConfig{}).
+		WithTransientKVGasConfig(storetypes.GasConfig{})
+	newStateDB := func() *statedb.StateDB {
+		return statedb.New(originalCtx, mocks.NewEVMKeeper(), emptyTxConfig)
+	}
+
+	suite.Run("restores an existing cache context", func() {
+		db := newStateDB()
+		originalCacheCtx, err := db.GetCacheContext()
+		suite.Require().NoError(err)
+
+		restoreGasContext := db.OverrideGasContext(isolationCtx)
+		overriddenCacheCtx, err := db.GetCacheContext()
+		suite.Require().NoError(err)
+		suite.Require().Equal(isolationMeter, db.GetContext().GasMeter())
+		suite.Require().Equal(isolationMeter, overriddenCacheCtx.GasMeter())
+		suite.Require().Equal(storetypes.GasConfig{}, db.GetContext().KVGasConfig())
+		suite.Require().Equal(storetypes.GasConfig{}, overriddenCacheCtx.KVGasConfig())
+		restoreGasContext()
+
+		restoredCacheCtx, err := db.GetCacheContext()
+		suite.Require().NoError(err)
+		suite.Require().Equal(originalMeter, db.GetContext().GasMeter())
+		suite.Require().Equal(originalCacheCtx.GasMeter(), restoredCacheCtx.GasMeter())
+		suite.Require().Equal(storetypes.KVGasConfig(), db.GetContext().KVGasConfig())
+		suite.Require().Equal(storetypes.KVGasConfig(), restoredCacheCtx.KVGasConfig())
+	})
+
+	suite.Run("retains a cache initialized during override", func() {
+		db := newStateDB()
+
+		restoreGasContext := db.OverrideGasContext(isolationCtx)
+		overriddenCacheCtx, err := db.GetCacheContext()
+		suite.Require().NoError(err)
+		overriddenCacheCtx.EventManager().EmitEvent(sdk.NewEvent("gas-context"))
+		restoreGasContext()
+
+		restoredCacheCtx, err := db.GetCacheContext()
+		suite.Require().NoError(err)
+		suite.Require().Len(restoredCacheCtx.EventManager().Events(), 1)
+		suite.Require().Equal(originalMeter, restoredCacheCtx.GasMeter())
+		suite.Require().Equal(storetypes.KVGasConfig(), restoredCacheCtx.KVGasConfig())
+		suite.Require().Equal(storetypes.TransientGasConfig(), restoredCacheCtx.TransientKVGasConfig())
+	})
+
+	suite.Run("restores contexts after panic", func() {
+		db := newStateDB()
+		_, err := db.GetCacheContext()
+		suite.Require().NoError(err)
+
+		suite.Require().Panics(func() {
+			restoreGasContext := db.OverrideGasContext(isolationCtx)
+			defer restoreGasContext()
+			panic("test panic")
+		})
+
+		restoredCacheCtx, err := db.GetCacheContext()
+		suite.Require().NoError(err)
+		suite.Require().Equal(originalMeter, db.GetContext().GasMeter())
+		suite.Require().Equal(originalMeter, restoredCacheCtx.GasMeter())
+		suite.Require().Equal(storetypes.KVGasConfig(), db.GetContext().KVGasConfig())
+		suite.Require().Equal(storetypes.KVGasConfig(), restoredCacheCtx.KVGasConfig())
+	})
 }
 
 func CollectContractStorage(db vm.StateDB) statedb.Storage {
