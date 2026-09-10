@@ -2,12 +2,14 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 
+	"github.com/cosmos/evm/contracts"
 	"github.com/cosmos/evm/x/vm/keeper"
 	"github.com/cosmos/evm/x/vm/statedb"
 	"github.com/cosmos/evm/x/vm/types"
@@ -27,11 +29,98 @@ func (dh *LogRecordHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ cor
 	return nil
 }
 
+func (dh *LogRecordHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
+	return dh.PostTxProcessing(ctx, sender, msg, receipt)
+}
+
 // FailureHook always fail
 type FailureHook struct{}
 
 func (dh *FailureHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ core.Message, _ *ethtypes.Receipt) error {
 	return errors.New("post tx processing failed")
+}
+
+func (dh *FailureHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
+	return dh.PostTxProcessing(ctx, sender, msg, receipt)
+}
+
+type hookRevertError struct {
+	data []byte
+}
+
+func (e hookRevertError) Error() string      { return "post tx hook reverted" }
+func (e hookRevertError) RevertData() []byte { return e.data }
+
+type RevertHook struct {
+	Data []byte
+}
+
+func (h RevertHook) PostTxProcessing(_ sdk.Context, _ common.Address, _ core.Message, _ *ethtypes.Receipt) error {
+	return hookRevertError{data: h.Data}
+}
+
+func (h RevertHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
+	return h.PostTxProcessing(ctx, sender, msg, receipt)
+}
+
+type NestedEVMGasHook struct {
+	keeper   *keeper.Keeper
+	contract common.Address
+	GasUsed  uint64
+}
+
+func (h *NestedEVMGasHook) PostTxProcessing(ctx sdk.Context, from common.Address, _ core.Message, _ *ethtypes.Receipt) error {
+	data, err := contracts.ERC20MinterBurnerDecimalsContract.ABI.Pack("balanceOf", from)
+	if err != nil {
+		return err
+	}
+	before := ctx.GasMeter().GasConsumed()
+	response, err := h.keeper.CallEVMViewWithData(
+		ctx,
+		from,
+		&h.contract,
+		data,
+		new(big.Int).SetUint64(ctx.GasMeter().GasRemaining()),
+	)
+	if err != nil {
+		return err
+	}
+	h.GasUsed = response.GasUsed
+	if delta := ctx.GasMeter().GasConsumed() - before; delta != response.GasUsed {
+		return fmt.Errorf("nested EVM gas charged %d, response used %d", delta, response.GasUsed)
+	}
+	return nil
+}
+
+func (h *NestedEVMGasHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
+	return h.PostTxProcessing(ctx, sender, msg, receipt)
+}
+
+// txTraceByReceiptIndexHook looks up the candidate tx trace using the receipt
+// index, matching downstream hooks that call GetTxTrace(ctx, receipt.TransactionIndex).
+type txTraceByReceiptIndexHook struct {
+	keeper       *keeper.Keeper
+	ReceiptIndex uint
+	Touches      int
+	Transfers    int
+	HookGas      uint64
+}
+
+func (h *txTraceByReceiptIndexHook) PostTxProcessing(ctx sdk.Context, _ common.Address, _ core.Message, receipt *ethtypes.Receipt) error {
+	h.ReceiptIndex = receipt.TransactionIndex
+	before := ctx.GasMeter().GasConsumed()
+	touches, transfers := h.keeper.GetTxTrace(ctx, uint64(receipt.TransactionIndex))
+	h.Touches = len(touches)
+	h.Transfers = len(transfers)
+	if h.Touches > 0 {
+		ctx.GasMeter().ConsumeGas(uint64(h.Touches)*1042, "policy get per call touch")
+	}
+	h.HookGas = ctx.GasMeter().GasConsumed() - before
+	return nil
+}
+
+func (h *txTraceByReceiptIndexHook) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
+	return h.PostTxProcessing(ctx, sender, msg, receipt)
 }
 
 func (s *KeeperTestSuite) TestEvmHooks() {
@@ -131,4 +220,21 @@ func (s *KeeperTestSuite) TestPostTxProcessingFailureLogReversion() {
 
 	// Critical test: Verify logs are completely cleared
 	s.Require().Nil(res.Logs, "res.Logs should be nil after PostTxProcessing failure")
+
+	var gasUsed, failure string
+	for _, event := range ctx.EventManager().Events() {
+		if event.Type != types.EventTypeEthereumTx {
+			continue
+		}
+		for _, attr := range event.Attributes {
+			switch attr.Key {
+			case types.AttributeKeyTxGasUsed:
+				gasUsed = attr.Value
+			case types.AttributeKeyEthereumTxFailed:
+				failure = attr.Value
+			}
+		}
+	}
+	s.Require().Equal(fmt.Sprintf("%d", res.GasUsed), gasUsed)
+	s.Require().Equal(res.VmError, failure)
 }

@@ -7,6 +7,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/mock"
 
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -22,6 +24,9 @@ import (
 
 	"cosmossdk.io/log/v2"
 	"cosmossdk.io/math"
+
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 func (s *TestSuite) TestGetTransactionByHash() {
@@ -704,6 +709,50 @@ func (s *TestSuite) TestGetTransactionReceipt() {
 			}
 		})
 	}
+}
+
+func (s *TestSuite) TestGetTransactionReceiptUsesCombinedGasAndFailureEvent() {
+	s.SetupTest()
+	msgEthereumTx, _ := s.buildEthereumTx()
+	txBz := s.signAndEncodeEthTx(msgEthereumTx)
+	txHash := msgEthereumTx.AsTransaction().Hash()
+	const chargedGas = uint64(54_321)
+
+	queryClient := s.backend.QueryClient.QueryClient.(*mocks.EVMQueryClient)
+	client := s.backend.ClientCtx.Client.(*mocks.Client)
+	RegisterBlock(client, 1, txBz)
+	blockRes, err := RegisterBlockResultsWithEventLog(client, 1)
+	s.Require().NoError(err)
+	anyValue, err := codectypes.NewAnyWithValue(&evmtypes.MsgEthereumTxResponse{})
+	s.Require().NoError(err)
+	data, err := proto.Marshal(&sdk.TxMsgData{MsgResponses: []*codectypes.Any{anyValue}})
+	s.Require().NoError(err)
+	blockRes.TxsResults[0].Data = data
+	blockRes.TxsResults[0].GasUsed = int64(chargedGas)
+	blockRes.TxsResults[0].Events = []abci.Event{{
+		Type: evmtypes.EventTypeEthereumTx,
+		Attributes: []abci.EventAttribute{
+			{Key: evmtypes.AttributeKeyEthereumTxHash, Value: txHash.Hex()},
+			{Key: evmtypes.AttributeKeyTxIndex, Value: "0"},
+			{Key: evmtypes.AttributeKeyTxGasUsed, Value: fmt.Sprintf("%d", chargedGas)},
+			{Key: evmtypes.AttributeKeyEthereumTxFailed, Value: "post tx hook failed"},
+		},
+	}}
+	RegisterBaseFee(queryClient, math.NewInt(1))
+
+	block := &types.Block{Header: types.Header{Height: 1}, Data: types.Data{Txs: []types.Tx{txBz}}}
+	db := dbm.NewMemDB()
+	s.backend.Indexer = indexer.NewKVIndexer(db, log.NewNopLogger(), s.backend.ClientCtx)
+	err = s.backend.Indexer.IndexBlock(block, blockRes.TxsResults)
+	s.Require().NoError(err)
+
+	receipt, err := s.backend.GetTransactionReceipt(s.Ctx(), txHash)
+	s.Require().NoError(err)
+	s.Require().Equal(hexutil.Uint64(chargedGas), receipt["gasUsed"])
+	s.Require().Equal(hexutil.Uint64(chargedGas), receipt["cumulativeGasUsed"])
+	s.Require().Equal(hexutil.Uint(ethtypes.ReceiptStatusFailed), receipt["status"])
+	s.Require().Equal([]*ethtypes.Log{}, receipt["logs"])
+	s.Require().Equal(ethtypes.Bloom{}, receipt["logsBloom"])
 }
 
 func (s *TestSuite) TestGetGasUsed() {
