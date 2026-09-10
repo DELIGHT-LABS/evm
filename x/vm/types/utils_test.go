@@ -377,6 +377,23 @@ func TestBinSearch(t *testing.T) {
 	gas, err = evmtypes.BinSearch(20000, 21001, failedExecutable)
 	require.Error(t, err)
 	require.Equal(t, gas, uint64(0))
+
+	t.Run("uint64 upper range", func(t *testing.T) {
+		const maxUint64 = ^uint64(0)
+		target := maxUint64 - 10
+		calls := 0
+		gas, err := evmtypes.BinSearch(maxUint64-100, maxUint64, func(gas uint64) (bool, *evmtypes.MsgEthereumTxResponse, error) {
+			calls++
+			if calls > 128 {
+				return false, nil, errors.New("binary search did not converge")
+			}
+			return gas < target, nil, nil
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, target, gas)
+		require.LessOrEqual(t, calls, 64)
+	})
 }
 
 func TestTransactionLogsEncodeDecode(t *testing.T) {

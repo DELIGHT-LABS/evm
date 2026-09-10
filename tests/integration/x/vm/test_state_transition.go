@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
 	gethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 
@@ -669,10 +670,18 @@ func (s *KeeperTestSuite) TestApplyTransaction() {
 }
 
 type testHooks struct {
-	postProcessing func(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error
+	postProcessing     func(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error
+	estimateProcessing func(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error
 }
 
 func (h *testHooks) PostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error {
+	return h.postProcessing(ctx, sender, msg, receipt)
+}
+
+func (h *testHooks) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error {
+	if h.estimateProcessing != nil {
+		return h.estimateProcessing(ctx, sender, msg, receipt)
+	}
 	return h.postProcessing(ctx, sender, msg, receipt)
 }
 
@@ -760,8 +769,10 @@ func (s *KeeperTestSuite) TestApplyTransactionWithTxPostProcessing() {
 				transferAmt := big.NewInt(100)
 
 				tx, err := s.Factory.GenerateSignedEthTx(sender.Priv, types.EvmTxArgs{
-					To:     &recipient,
-					Amount: transferAmt,
+					To:       &recipient,
+					Amount:   transferAmt,
+					GasLimit: 100_000,
+					GasPrice: big.NewInt(0),
 				})
 				s.Require().NoError(err)
 
@@ -844,6 +855,183 @@ func (s *KeeperTestSuite) TestApplyTransactionWithTxPostProcessing() {
 			tc.after(s)
 		})
 	}
+}
+
+func (s *KeeperTestSuite) TestApplyTransactionPostTxHookOutOfGasUsesFullLimitAndRollsBack() {
+	s.SetupTest()
+
+	const (
+		gasLimit    = uint64(100_000)
+		mintedDenom = "ahookoog"
+	)
+	hook := &testHooks{
+		postProcessing: func(ctx sdk.Context, _ common.Address, _ core.Message, _ *gethtypes.Receipt) error {
+			err := s.Network.App.GetMintKeeper().MintCoins(
+				ctx,
+				sdk.NewCoins(sdk.NewInt64Coin(mintedDenom, 1)),
+			)
+			s.Require().NoError(err)
+			ctx.GasMeter().ConsumeGas(ctx.GasMeter().GasRemaining()+1, "force post tx hook out of gas")
+			return nil
+		},
+	}
+	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(hook))
+
+	sender := s.Keyring.GetKey(0)
+	recipient := s.Keyring.GetAddr(1)
+	senderBefore := s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), sender.AccAddr, types.GetEVMCoinDenom())
+	recipientBefore := s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), recipient.Bytes(), types.GetEVMCoinDenom())
+
+	tx, err := s.Factory.GenerateSignedEthTx(sender.Priv, types.EvmTxArgs{
+		To:       &recipient,
+		Amount:   big.NewInt(100),
+		GasLimit: gasLimit,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	msg := tx.GetMsgs()[0].(*types.MsgEthereumTx)
+	ctx := s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(gasLimit * 2))
+
+	response, err := s.Network.App.GetEVMKeeper().ApplyTransaction(ctx, msg.AsTransaction())
+	s.Require().NoError(err)
+	s.Require().True(response.Failed())
+	s.Require().Equal(vm.ErrOutOfGas.Error(), response.VmError)
+	s.Require().Equal(gasLimit, response.GasUsed)
+	s.Require().Nil(response.Logs)
+	s.Require().Equal(gasLimit, ctx.GasMeter().GasConsumed())
+	s.Require().Equal(gasLimit, s.Network.App.GetEVMKeeper().GetTransientGasUsed(ctx))
+
+	senderAfter := s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), sender.AccAddr, types.GetEVMCoinDenom())
+	recipientAfter := s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), recipient.Bytes(), types.GetEVMCoinDenom())
+	s.Require().Equal(senderBefore, senderAfter)
+	s.Require().Equal(recipientBefore, recipientAfter)
+	moduleAddr := s.Network.App.GetAccountKeeper().GetModuleAddress("mint")
+	s.Require().True(s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), moduleAddr, mintedDenom).IsZero())
+}
+
+func (s *KeeperTestSuite) TestApplyTransactionCombinedHookGasRefundAndFinalAccounting() {
+	s.EnableFeemarket = true
+	defer func() { s.EnableFeemarket = false }()
+	s.SetupTest()
+
+	const gasLimit = uint64(100_000)
+	ctx := s.Network.GetContext().WithBlockGasMeter(storetypes.NewGasMeter(1e6))
+	baseDenom := types.GetEVMCoinDenom()
+	feeCoins := sdk.NewCoins(sdk.NewCoin(baseDenom, sdkmath.NewInt(3e18)))
+	err := s.Network.App.GetBankKeeper().MintCoins(ctx, "mint", feeCoins)
+	s.Require().NoError(err)
+	err = s.Network.App.GetBankKeeper().SendCoinsFromModuleToModule(ctx, "mint", authtypes.FeeCollectorName, feeCoins)
+	s.Require().NoError(err)
+	feeCollectorAddr := authtypes.NewModuleAddress(authtypes.FeeCollectorName)
+	err = s.Network.App.GetBankKeeper().SendCoinsFromAccountToModuleVirtual(
+		ctx,
+		feeCollectorAddr,
+		authtypes.FeeCollectorName,
+		feeCoins,
+	)
+	s.Require().NoError(err)
+
+	var hookReceipt *gethtypes.Receipt
+	hook := &testHooks{postProcessing: func(hookCtx sdk.Context, _ common.Address, _ core.Message, receipt *gethtypes.Receipt) error {
+		hookCtx.GasMeter().ConsumeGas(1_000, "deterministic hook gas")
+		hookReceipt = receipt
+		return nil
+	}}
+	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(hook))
+
+	sender := s.Keyring.GetKey(0)
+	recipient := s.Keyring.GetAddr(1)
+	tx, err := s.Factory.GenerateSignedEthTx(sender.Priv, types.EvmTxArgs{
+		To:       &recipient,
+		GasLimit: gasLimit,
+	})
+	s.Require().NoError(err)
+	msg := tx.GetMsgs()[0].(*types.MsgEthereumTx)
+	ctx = ctx.WithGasMeter(storetypes.NewGasMeter(gasLimit * 2))
+	senderBefore := s.Network.App.GetBankKeeper().GetBalance(ctx, sender.AccAddr, baseDenom)
+
+	response, err := s.Network.App.GetEVMKeeper().ApplyTransaction(ctx, msg.AsTransaction())
+	s.Require().NoError(err)
+	s.Require().False(response.Failed())
+	// The default 0.5 minimum multiplier wins over E+H=22,000. Hook gas is
+	// included before applying the floor, never added on top of it.
+	const chargedGas = gasLimit / 2
+	s.Require().Equal(chargedGas, response.GasUsed)
+	s.Require().NotNil(hookReceipt)
+	s.Require().Equal(chargedGas, hookReceipt.GasUsed)
+	s.Require().Equal(chargedGas, hookReceipt.CumulativeGasUsed)
+	s.Require().Equal(chargedGas, ctx.GasMeter().GasConsumed())
+	s.Require().Equal(chargedGas, s.Network.App.GetEVMKeeper().GetTransientGasUsed(ctx))
+
+	senderAfter := s.Network.App.GetBankKeeper().GetBalance(ctx, sender.AccAddr, baseDenom)
+	expectedRefund := new(big.Int).Mul(
+		new(big.Int).SetUint64(gasLimit-chargedGas),
+		s.Network.App.GetEVMKeeper().GetBaseFee(ctx),
+	)
+	s.Require().Equal(sdkmath.NewIntFromBigInt(expectedRefund), senderAfter.Sub(senderBefore).Amount)
+}
+
+func (s *KeeperTestSuite) TestApplyTransactionMultipleMessagesUseCombinedCumulativeGas() {
+	s.SetupTest()
+
+	const (
+		hookGas    = uint64(1_000)
+		gasLimit   = params.TxGas + hookGas
+		chargedGas = gasLimit
+	)
+	var receipts []*gethtypes.Receipt
+	hook := &testHooks{postProcessing: func(ctx sdk.Context, _ common.Address, _ core.Message, receipt *gethtypes.Receipt) error {
+		ctx.GasMeter().ConsumeGas(hookGas, "deterministic hook gas")
+		receipts = append(receipts, receipt)
+		return nil
+	}}
+	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(hook))
+
+	ctx := s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(gasLimit * 3))
+	for range 2 {
+		recipient := s.Keyring.GetAddr(1)
+		tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+			To:       &recipient,
+			GasLimit: gasLimit,
+			GasPrice: big.NewInt(0),
+		})
+		s.Require().NoError(err)
+		response, err := s.Network.App.GetEVMKeeper().ApplyTransaction(
+			ctx,
+			tx.GetMsgs()[0].(*types.MsgEthereumTx).AsTransaction(),
+		)
+		s.Require().NoError(err)
+		s.Require().Equal(chargedGas, response.GasUsed)
+	}
+
+	s.Require().Len(receipts, 2)
+	s.Require().Equal(chargedGas, receipts[0].GasUsed)
+	s.Require().Equal(chargedGas, receipts[0].CumulativeGasUsed)
+	s.Require().Equal(chargedGas, receipts[1].GasUsed)
+	s.Require().Equal(chargedGas*2, receipts[1].CumulativeGasUsed)
+	s.Require().Equal(chargedGas*2, ctx.GasMeter().GasConsumed())
+	s.Require().Equal(chargedGas*2, s.Network.App.GetEVMKeeper().GetTransientGasUsed(ctx))
+}
+
+func (s *KeeperTestSuite) TestApplyTransactionCumulativeOverflowDoesNotMutateTransientGas() {
+	s.SetupTest()
+
+	const gasLimit = params.TxGas
+	ctx := s.Network.GetContext().WithGasMeter(storetypes.NewGasMeter(gasLimit * 2))
+	k := s.Network.App.GetEVMKeeper()
+	previous := math.MaxUint64 - gasLimit + 1
+	k.SetTransientGasUsed(ctx, previous)
+	recipient := s.Keyring.GetAddr(1)
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), types.EvmTxArgs{
+		To:       &recipient,
+		GasLimit: gasLimit,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+
+	_, err = k.ApplyTransaction(ctx, tx.GetMsgs()[0].(*types.MsgEthereumTx).AsTransaction())
+	s.Require().ErrorIs(err, types.ErrGasOverflow)
+	s.Require().Equal(previous, k.GetTransientGasUsed(ctx))
 }
 
 func (s *KeeperTestSuite) TestApplyMessage() {
