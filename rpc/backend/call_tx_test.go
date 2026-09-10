@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"strconv"
 	"testing"
 	"time"
 
@@ -53,7 +54,7 @@ func TestEstimateGasAppliesEVMTimeout(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
-func TestSetTxDefaultsPreservesTypedTransactionFieldsForEstimateGas(t *testing.T) {
+func TestSetTxDefaultsEstimatesTypedTransactionsAtLatestBlock(t *testing.T) {
 	configurator := evmtypes.NewEVMConfigurator()
 	configurator.ResetTestConfig()
 	require.NoError(t, evmtypes.SetChainConfig(evmtypes.DefaultChainConfig(constants.ExampleChainID.EVMChainID)))
@@ -135,6 +136,9 @@ func setupSetTxDefaultsTestBackend(
 ) *Backend {
 	t.Helper()
 
+	// A chain past genesis distinguishes latest-state estimation from height 1.
+	const latestHeight = int64(42)
+
 	backend := setupMockBackend(t)
 	queryClient := mocks.NewEVMQueryClient(t)
 	backend.QueryClient.QueryClient = queryClient
@@ -142,7 +146,7 @@ func setupSetTxDefaultsTestBackend(
 	queryClient.On("Params", mock.Anything, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			header := args.Get(2).(grpc.HeaderCallOption)
-			*header.HeaderAddr = metadata.Pairs(grpctypes.GRPCBlockHeightHeader, "1")
+			*header.HeaderAddr = metadata.Pairs(grpctypes.GRPCBlockHeightHeader, strconv.FormatInt(latestHeight, 10))
 		}).
 		Return(&evmtypes.QueryParamsResponse{Params: evmtypes.DefaultParams()}, nil).
 		Maybe()
@@ -154,6 +158,9 @@ func setupSetTxDefaultsTestBackend(
 		Maybe()
 	queryClient.On("EstimateGas", mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			md, _ := metadata.FromOutgoingContext(ctx)
+			require.Empty(t, md.Get(grpctypes.GRPCBlockHeightHeader), "gas estimation must query the latest state")
 			req := args.Get(1).(*evmtypes.EthCallRequest)
 			require.NoError(t, json.Unmarshal(req.Args, estimateArgs))
 		}).
@@ -161,7 +168,7 @@ func setupSetTxDefaultsTestBackend(
 		Once()
 
 	header := tmtypes.Header{
-		Height:  1,
+		Height:  latestHeight,
 		Time:    time.Now(),
 		ChainID: constants.ExampleChainID.ChainID,
 	}
@@ -171,11 +178,16 @@ func setupSetTxDefaultsTestBackend(
 		Return(&cmtrpctypes.ResultBlock{Block: block}, nil).
 		Maybe()
 	client.On("BlockResults", mock.Anything, mock.Anything).
-		Return(&cmtrpctypes.ResultBlockResults{Height: 1}, nil).
+		Return(&cmtrpctypes.ResultBlockResults{Height: latestHeight}, nil).
 		Maybe()
 	client.On("Header", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			height := args.Get(1).(*int64)
+			require.NotNil(t, height)
+			require.Equal(t, latestHeight, *height, "gas estimation must use the latest committed header")
+		}).
 		Return(&cmtrpctypes.ResultHeader{Header: &header}, nil).
-		Maybe()
+		Once()
 	client.On("ConsensusParams", mock.Anything, mock.Anything).
 		Return(nil, errors.New("consensus params unavailable")).
 		Maybe()
