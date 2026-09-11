@@ -127,6 +127,7 @@ func SetupNativeErc20(t *testing.T, chain *evmibctesting.TestChain, senderAcc ev
 }
 
 // DeployContract deploys an arbitrary contract on an EVM-based chain.
+// Like DeployERC20Contract, the sender is an EOA rather than a module account.
 func DeployContract(t *testing.T, chain *evmibctesting.TestChain, deploymentData testutiltypes.ContractDeploymentData) (common.Address, error) {
 	t.Helper()
 
@@ -156,7 +157,12 @@ func DeployContract(t *testing.T, chain *evmibctesting.TestChain, deploymentData
 }
 
 // DeployERC20Contract creates and deploys an ERC20 contract on the EVM with
-// deployer as owner. The deployer must be an EOA, not a module account.
+// deployer as owner.
+//
+// deployer must be an EOA. Do not pass a module account.
+// It is also required in practice. Contract creation bumps the sender's nonce,
+// SetAccount persists nonce and balance together, and the EVM commit path is
+// not allowed to write a module account's balance.
 func DeployERC20Contract(
 	ctx sdk.Context,
 	stateDB *statedb.StateDB,
