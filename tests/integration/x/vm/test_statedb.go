@@ -1366,6 +1366,33 @@ func (s *KeeperTestSuite) TestSetBalanceRejectsModuleAccounts() {
 		amountFn func(current *uint256.Int) *uint256.Int
 	}{
 		{
+			name: "bonded_tokens_pool, decrease (isBlockedChange arm)",
+			prepare: func() setup {
+				modEth := common.BytesToAddress(authtypes.NewModuleAddress(stakingtypes.BondedPoolName).Bytes())
+				return setup{
+					addr:    modEth,
+					current: s.Network.App.GetEVMKeeper().GetBalance(s.Network.GetContext(), modEth),
+				}
+			},
+			amountFn: func(cur *uint256.Int) *uint256.Int {
+				if cur.IsZero() {
+					return uint256.NewInt(0)
+				}
+				return new(uint256.Int).Sub(cur, uint256.NewInt(1))
+			},
+		},
+		{
+			name: "bonded_tokens_pool, equal (isModule arm, isBlockedChange skipped)",
+			prepare: func() setup {
+				modEth := common.BytesToAddress(authtypes.NewModuleAddress(stakingtypes.BondedPoolName).Bytes())
+				return setup{
+					addr:    modEth,
+					current: s.Network.App.GetEVMKeeper().GetBalance(s.Network.GetContext(), modEth),
+				}
+			},
+			amountFn: func(cur *uint256.Int) *uint256.Int { return new(uint256.Int).Set(cur) },
+		},
+		{
 			name:     "mock module account, zero balance, write nonzero",
 			prepare:  mockModuleSetup("test-mod-zero", 0),
 			amountFn: func(_ *uint256.Int) *uint256.Int { return uint256.NewInt(12345) },

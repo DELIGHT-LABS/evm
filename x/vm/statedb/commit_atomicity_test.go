@@ -102,6 +102,7 @@ func TestCommitAtomicity(t *testing.T) {
 		cacheCtx, err := db.GetCacheContext()
 		require.NoError(t, err)
 		require.NoError(t, db.Keeper().SetAccount(cacheCtx, precompileAddr, statedb.Account{Balance: uint256.NewInt(7)}))
+		cacheCtx.EventManager().EmitEvent(sdk.NewEvent("precompile-staged"))
 	}
 
 	t.Run("late failure discards the whole commit", func(t *testing.T) {
@@ -118,6 +119,7 @@ func TestCommitAtomicity(t *testing.T) {
 		require.Error(t, db.Commit())
 		require.Nil(t, persisted(db, credit))
 		require.Nil(t, persisted(db, precompileAddr))
+		require.Empty(t, db.GetContext().EventManager().Events())
 	})
 
 	t.Run("success still persists everything", func(t *testing.T) {
@@ -135,5 +137,7 @@ func TestCommitAtomicity(t *testing.T) {
 		require.NoError(t, db.Commit())
 		require.Equal(t, uint256.NewInt(1_000_000), persisted(db, credit).Balance)
 		require.Equal(t, uint256.NewInt(7), persisted(db, precompileAddr).Balance)
+		require.Len(t, db.GetContext().EventManager().Events(), 1)
+		require.Equal(t, "precompile-staged", db.GetContext().EventManager().Events()[0].Type)
 	})
 }
