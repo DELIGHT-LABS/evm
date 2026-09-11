@@ -1,12 +1,34 @@
 # CHANGELOG
 
 ## UNRELEASED
+
+### DEPENDENCIES
+
+### API-BREAKING
+
+### IMPROVEMENTS
+
+### FEATURES
+
+### BUG FIXES
+- [\#732](https://github.com/cosmos/evm/pull/732) Fix mempool state-read races in integration tests.
+- Sync upstream `release/v0.6.x` through `71c78b507`, including IBC v2 conversion acknowledgements, StateDB balance guards, atomic commits, and balance event amount handling.
+
+## v0.6.2
+
+### IMPROVEMENTS
+- [\#1243](https://github.com/cosmos/evm/pull/1243) Deploy contracts from an EOA rather than a module account in the test helpers. It is also now required: contract creation bumps the sender's nonce, `SetAccount` persists nonce and balance together, and the EVM commit path may not write a module account's balance.
+
+### BUG FIXES
+- [\#1222](https://github.com/cosmos/evm/pull/1222) Propagate ERC20 conversion ack in IBC v2 `OnRecvPacket`.
+
+## v0.6.1
+
 ### IMPROVEMENTS
 - [\#1238](https://github.com/cosmos/evm/pull/1238) Validate ICS-20 acknowledgement encoding in the erc20 IBC v2 middleware.
 
 ### BUG FIXES
-- [\#732](https://github.com/cosmos/evm/pull/732) Fix mempool state-read races in integration tests.
-- [\#1243](https://github.com/cosmos/evm/pull/1243) Deploy contracts from an EOA rather than a module account in test helpers.
+- Align precompile gas calculation with expected EVM gas semantics.
 
 ## v0.6.0
 
@@ -23,8 +45,6 @@ Follow the [migration document](docs/migrations/v0.5.x_to_v0.6.0.md) for upgrade
 ### FEATURES
 
 ### BUG FIXES
-
-- Align precompile gas calculation with expected EVM gas semantics.
 
 ## v0.5.1
 
