@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -18,7 +17,6 @@ import (
 	cmtrpcclient "github.com/cometbft/cometbft/rpc/client"
 	cmtrpctypes "github.com/cometbft/cometbft/rpc/core/types"
 
-	"github.com/cosmos/evm/mempool/txpool"
 	rpctypes "github.com/cosmos/evm/rpc/types"
 	servertypes "github.com/cosmos/evm/server/types"
 	"github.com/cosmos/evm/utils"
@@ -141,36 +139,10 @@ func (b *Backend) GetTransactionReceipt(hash common.Hash) (map[string]interface{
 	hexTx := hash.Hex()
 	b.Logger.Debug("eth_getTransactionReceipt", "hash", hexTx)
 
-	// Retry logic for transaction lookup with exponential backoff
-	maxRetries := 10
-	baseDelay := 50 * time.Millisecond
-
-	var res *servertypes.TxResult
-	var err error
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		res, err = b.GetTxByEthHash(hash)
-		if err == nil {
-			break // Found the transaction
-		}
-
-		if attempt == maxRetries/2 && b.Mempool != nil {
-			status := b.Mempool.GetTxPool().Status(hash)
-			if status == txpool.TxStatusUnknown {
-				break
-			}
-		}
-
-		if attempt < maxRetries {
-			// Exponential backoff: 50ms, 100ms, 200ms
-			delay := time.Duration(1<<attempt) * baseDelay
-			b.Logger.Debug("tx not found, retrying", "hash", hexTx, "attempt", attempt+1, "delay", delay)
-			time.Sleep(delay)
-		}
-	}
-
+	// an unmined tx has no receipt: answer null like geth and let the client poll
+	res, err := b.GetTxByEthHash(hash)
 	if err != nil {
-		b.Logger.Debug("tx not found after retries", "hash", hexTx, "error", err.Error())
+		b.Logger.Debug("tx not found", "hash", hexTx, "error", err.Error())
 		return nil, nil
 	}
 

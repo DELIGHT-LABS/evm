@@ -503,3 +503,15 @@ func TestReceiptsFromCometBlock(t *testing.T) {
 		})
 	}
 }
+
+// an unmined tx has no receipt: null right away, with or without an EVM mempool
+func TestGetTransactionReceiptUnknownTx(t *testing.T) {
+	backend := setupMockBackend(t)
+	require.Nil(t, backend.Mempool)
+
+	start := time.Now()
+	receipt, err := backend.GetTransactionReceipt(common.HexToHash("0xdeadbeef"))
+	require.NoError(t, err)
+	require.Nil(t, receipt)
+	require.Less(t, time.Since(start), time.Second)
+}
