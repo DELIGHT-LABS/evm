@@ -20,18 +20,14 @@ import (
 	"github.com/cosmos/evm/x/vm/types/mocks"
 
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
-<<<<<<< HEAD
 	sdktestutil "github.com/cosmos/cosmos-sdk/testutil"
-=======
-	"github.com/cosmos/cosmos-sdk/testutil"
->>>>>>> 6cf99f5 (Merge commit from fork)
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 func newTestCtx() sdk.Context {
 	key := storetypes.NewKVStoreKey("statedb_test")
 	tkey := storetypes.NewTransientStoreKey("statedb_test_transient")
-	return testutil.DefaultContext(key, tkey).WithEventManager(sdk.NewEventManager())
+	return sdktestutil.DefaultContext(key, tkey).WithEventManager(sdk.NewEventManager())
 }
 
 var (
