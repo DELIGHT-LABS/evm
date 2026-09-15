@@ -3,11 +3,29 @@
 ## UNRELEASED
 
 ### DEPENDENCIES
+
 ### API-BREAKING
+
 ### IMPROVEMENTS
+
 ### FEATURES
+
 - [\#1181](https://github.com/cosmos/evm/pull/1181) Support state overrides in `debug_traceCall`.
+
 ### BUG FIXES
+
+## v0.7.2
+
+### IMPROVEMENTS
+- [\#1243](https://github.com/cosmos/evm/pull/1243) Deploy contracts from an EOA rather than a module account in the test helpers. It is also now required: contract creation bumps the sender's nonce, `SetAccount` persists nonce and balance together, and the EVM commit path may not write a module account's balance.
+
+## v0.7.1
+
+### IMPROVEMENTS
+- [\#1239](https://github.com/cosmos/evm/pull/1239) Validate ICS-20 acknowledgement encoding in the erc20 IBC v2 middleware.
+
+### BUG FIXES
+- [\#1223](https://github.com/cosmos/evm/pull/1223) Reject EVM txs below the base fee at mempool insert instead of silently queuing them.
 
 ## v0.7.0
 
