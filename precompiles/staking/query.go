@@ -1,12 +1,12 @@
 package staking
 
 import (
-	"fmt"
 	"math/big"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	cmn "github.com/cosmos/evm/precompiles/common"
 
@@ -49,15 +49,15 @@ func (p Precompile) Delegation(
 	res, err := p.stakingQuerier.Delegation(ctx, req)
 	if err != nil {
 		// If there is no delegation found, return the response with zero values.
-		if strings.Contains(err.Error(), fmt.Sprintf(ErrNoDelegationFound, req.DelegatorAddr, req.ValidatorAddr)) {
+		if stakingQueryPreservesSuccess(DelegationMethod, err) {
 			bondDenom, err := p.stakingKeeper.BondDenom(ctx)
 			if err != nil {
-				return nil, err
+				return nil, cmn.NewRevertWithSolidityError(p.ABI, SolidityErrBondDenomQueryFailed, err.Error())
 			}
 			return method.Outputs.Pack(big.NewInt(0), cmn.Coin{Denom: bondDenom, Amount: big.NewInt(0)})
 		}
 
-		return nil, err
+		return nil, cosmosErrorRegistry.ResolveQueryError(p.ABI, DelegationMethod, err, nil).Err
 	}
 
 	out := new(DelegationOutput).FromResponse(res)
@@ -81,11 +81,10 @@ func (p Precompile) UnbondingDelegation(
 	res, err := p.stakingQuerier.UnbondingDelegation(ctx, req)
 	if err != nil {
 		// return empty unbonding delegation output if the unbonding delegation is not found
-		expError := fmt.Sprintf("unbonding delegation with delegator %s not found for validator %s", req.DelegatorAddr, req.ValidatorAddr)
-		if strings.Contains(err.Error(), expError) {
+		if stakingQueryPreservesSuccess(UnbondingDelegationMethod, err) {
 			return method.Outputs.Pack(UnbondingDelegationResponse{})
 		}
-		return nil, err
+		return nil, cosmosErrorRegistry.ResolveQueryError(p.ABI, UnbondingDelegationMethod, err, nil).Err
 	}
 
 	out := new(UnbondingDelegationOutput).FromResponse(res)
@@ -108,11 +107,10 @@ func (p Precompile) Validator(
 	res, err := p.stakingQuerier.Validator(ctx, req)
 	if err != nil {
 		// return empty validator info if the validator is not found
-		expError := fmt.Sprintf("validator %s not found", req.ValidatorAddr)
-		if strings.Contains(err.Error(), expError) {
+		if stakingQueryPreservesSuccess(ValidatorMethod, err) {
 			return method.Outputs.Pack(DefaultValidatorInfo())
 		}
-		return nil, err
+		return nil, cosmosErrorRegistry.ResolveQueryError(p.ABI, ValidatorMethod, err, nil).Err
 	}
 
 	validatorInfo := NewValidatorInfoFromResponse(res.Validator)
@@ -134,7 +132,7 @@ func (p Precompile) Validators(
 
 	res, err := p.stakingQuerier.Validators(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, cosmosErrorRegistry.ResolveQueryError(p.ABI, ValidatorsMethod, err, nil).Err
 	}
 
 	out := new(ValidatorsOutput).FromResponse(res)
@@ -178,10 +176,22 @@ func (p Precompile) Redelegations(
 
 	res, err := p.stakingQuerier.Redelegations(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, cosmosErrorRegistry.ResolveQueryError(p.ABI, RedelegationsMethod, err, nil).Err
 	}
 
 	out := new(RedelegationsOutput).FromResponse(res)
 
 	return out.Pack(method.Outputs)
+}
+
+func stakingQueryPreservesSuccess(method string, err error) bool {
+	if !cmn.NeedsErrorTranslation(err) {
+		return false
+	}
+	switch method {
+	case DelegationMethod, UnbondingDelegationMethod, ValidatorMethod:
+		return status.Code(err) == codes.NotFound
+	default:
+		return false
+	}
 }
