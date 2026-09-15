@@ -6,6 +6,8 @@
 
 ### API-BREAKING
 
+- [\#1099](https://github.com/cosmos/evm/pull/1099) Precompile reverts now use Solidity custom errors instead of `Error(string)` revert data.
+
 ### IMPROVEMENTS
 
 ### FEATURES
