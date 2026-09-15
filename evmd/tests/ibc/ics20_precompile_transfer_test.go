@@ -176,8 +176,11 @@ func (suite *ICS20TransferTestSuite) TestHandleMsgTransfer() {
 			if msgAmount.Equal(transfertypes.UnboundedSpendLimit()) {
 				suite.Require().ErrorContains(err, vm.ErrExecutionReverted.Error())
 				suite.Require().NotNil(txEvmRes)
-				revertErr := chainutil.DecodeRevertReason(*txEvmRes)
-				suite.Require().ErrorContains(revertErr, ics20.ErrUnboundedSpendLimit)
+				// The precompile rejects this sentinel before keeper translation;
+				// preserve its existing Error(string) bytes.
+				expected, packErr := evmtypes.RevertReasonBytes(ics20.ErrUnboundedSpendLimit + ": " + transfertypes.ErrInvalidAmount.Error())
+				suite.Require().NoError(packErr)
+				suite.Require().Equal(expected, txEvmRes.Ret)
 				suite.Require().Equal(senderBalance, GetBalance(senderAddr))
 				return
 			}

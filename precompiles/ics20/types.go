@@ -14,6 +14,7 @@ import (
 	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
 	host "github.com/cosmos/ibc-go/v11/modules/core/24-host"
 
+	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"

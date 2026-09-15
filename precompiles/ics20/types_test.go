@@ -5,15 +5,19 @@ import (
 	"strings"
 	"testing"
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 
+	cmn "github.com/cosmos/evm/precompiles/common"
+	"github.com/cosmos/evm/precompiles/testutil"
 	transfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
 	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
+	ibcerrors "github.com/cosmos/ibc-go/v11/modules/core/errors"
+
+	sdkmath "cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/query"
 )
 
 func TestNewMsgTransferRejectsUnboundedSpendLimit(t *testing.T) {
@@ -61,23 +65,8 @@ func TestNewMsgTransferRejectsUnboundedSpendLimit(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, sender, returnAddr)
 		require.Equal(t, amount, msg.Token.Amount.BigInt())
-=======
-=======
-	"github.com/ethereum/go-ethereum/common"
->>>>>>> fc0c55f (fix(ics20): preserve invalid coin validation error details)
-	"github.com/stretchr/testify/require"
-
-	cmn "github.com/cosmos/evm/precompiles/common"
-	"github.com/cosmos/evm/precompiles/testutil"
-	transfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
-	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
-	ibcerrors "github.com/cosmos/ibc-go/v11/modules/core/errors"
-
-	sdkmath "cosmossdk.io/math"
-
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/types/query"
-)
+	})
+}
 
 func TestNewDenomsRequest(t *testing.T) {
 	method, ok := ABI.Methods[DenomsMethod]
@@ -115,7 +104,6 @@ func TestNewDenomsRequest(t *testing.T) {
 
 		testutil.RequireExactError(t, err, wantErr)
 		require.Nil(t, req)
->>>>>>> f0b5980 (feat(precompiles): add shared page request validation)
 	})
 }
 
