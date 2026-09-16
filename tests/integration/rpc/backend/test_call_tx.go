@@ -336,7 +336,7 @@ func (s *TestSuite) TestSendRawTransaction() {
 				return bytes
 			},
 			expHash:  common.Hash{},
-			expError: fmt.Errorf("incorrect chain-id; expected %d, got %d", constants.ExampleChainID.EVMChainID, invalidChainID).Error(),
+			expError: fmt.Sprintf("chainId does not match node's (have=%v, want=%v)", invalidChainID, constants.ExampleChainID.EVMChainID),
 		},
 		{
 			name: "fail - unprotected tx",

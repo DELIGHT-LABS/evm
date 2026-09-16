@@ -3,6 +3,7 @@ package types
 import (
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -99,6 +100,26 @@ var (
 	// ErrNilStateDB
 	ErrNilStateDB = errorsmod.Register(ModuleName, codeErrNilStateDB, "stateDB cannot be nil")
 )
+
+// ChainIDMismatchError reports the expected and supplied EVM chain IDs.
+// Transaction submission and simulation share this cause for ABI error mapping.
+type ChainIDMismatchError struct {
+	Expected *big.Int
+	Actual   *big.Int
+}
+
+// NewChainIDMismatchError copies the expected and supplied chain IDs so later
+// mutations of the inputs cannot change the error. Both inputs must be non-nil.
+func NewChainIDMismatchError(expected, actual *big.Int) *ChainIDMismatchError {
+	return &ChainIDMismatchError{
+		Expected: new(big.Int).Set(expected),
+		Actual:   new(big.Int).Set(actual),
+	}
+}
+
+func (e *ChainIDMismatchError) Error() string {
+	return fmt.Sprintf("chainId does not match node's (have=%v, want=%v)", e.Actual, e.Expected)
+}
 
 // RevertReasonBytes converts a message to ABI-encoded revert bytes.
 func RevertReasonBytes(reason string) ([]byte, error) {
