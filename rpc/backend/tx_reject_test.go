@@ -197,11 +197,11 @@ func admissionJSONResponse(t *testing.T, server *rpc.Server, raw []byte) map[str
 func TestSendRawTransactionAdmissionTransport(t *testing.T) {
 	configurator := evmtypes.NewEVMConfigurator()
 	configurator.ResetTestConfig()
-require.NoError(t,
-        configurator.
-                WithEVMCoinInfo(constants.ChainsCoinInfo[constants.ExampleChainID.EVMChainID]).
-                Configure(),
-  )
+	require.NoError(t,
+		configurator.
+			WithEVMCoinInfo(constants.ChainsCoinInfo[constants.ExampleChainID.EVMChainID]).
+			Configure(),
+	)
 	require.NoError(t, evmtypes.SetChainConfig(evmtypes.DefaultChainConfig(constants.ExampleChainID.EVMChainID)))
 	t.Cleanup(configurator.ResetTestConfig)
 	backend := setupMockBackend(t)
