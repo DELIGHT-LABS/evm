@@ -25,4 +25,17 @@ interface IPrecompile {
     error SDKInvalidType();
     error SDKNotFound();
     error UnmappedCosmosError(string codespace, uint32 code);
+
+    error InsufficientFee();
+    error NonceTooLow();
+    error NonceGap();
+    error IntrinsicGasTooLow();
+    error FloorDataGasTooLow();
+    error TipAboveFeeCap();
+    error FeeCapTooHigh();
+    error TipTooHigh();
+    error GasPriceTooLow();
+    error GasLimitExceeded();
+    error InvalidSender();
+    error ChainIdMismatch(uint256 expected, uint256 actual);
 }

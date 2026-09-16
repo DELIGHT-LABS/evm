@@ -449,6 +449,7 @@ func (b *Backend) CreateAccessList(
 ) (result *rpctypes.AccessListResult, err error) {
 	ctx, span := tracer.Start(ctx, "CreateAccessList", trace.WithAttributes(attribute.String("from", args.GetFrom().Hex()), attribute.String("blockNrOrHash", unwrapBlockNOrHash(blockNrOrHash))))
 	defer func() { evmtrace.EndSpanErr(span, err) }()
+	defer func() { err = resolveTxRejectError(err) }()
 
 	accessList, gasUsed, vmErr, err := b.createAccessList(ctx, args, blockNrOrHash, overrides)
 	if err != nil {
@@ -510,7 +511,7 @@ func (b *Backend) createAccessList(
 		res, err := b.DoCall(ctx, *traceArgs, blockNum, overrides)
 		if err != nil {
 			b.Logger.Error("failed to apply transaction", "error", err)
-			return nil, 0, nil, fmt.Errorf("failed to apply transaction: %v err: %v", traceArgs.ToTransaction(ethtypes.LegacyTxType).Hash(), err)
+			return nil, 0, nil, fmt.Errorf("failed to apply transaction: %v err: %w", traceArgs.ToTransaction(ethtypes.LegacyTxType).Hash(), err)
 		}
 
 		// Check if access list has converged (no new addresses/slots accessed)
