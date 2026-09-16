@@ -246,7 +246,6 @@ func (s *TestSuite) TestSignTypedData() {
 	}
 }
 
-//nolint:unparam
 func buildBroadcastTx(suite *TestSuite, priv *ethsecp256k1.PrivKey, baseFee math.Int, callArgsDefault evmtypes.TransactionArgs) (*mocks.Client, signing.Tx) {
 	var header metadata.MD
 
