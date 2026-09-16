@@ -18,7 +18,6 @@ package types
 
 import (
 	"errors"
-	"fmt"
 	"math"
 	"math/big"
 
@@ -96,7 +95,7 @@ func (args *TransactionArgs) CallDefaults(globalGasCap uint64, baseFee *big.Int,
 		args.ChainID = (*hexutil.Big)(chainID)
 	} else {
 		if have := (*big.Int)(args.ChainID); have.Cmp(chainID) != 0 {
-			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, chainID)
+			return NewChainIDMismatchError(chainID, have)
 		}
 	}
 	if args.Gas == nil {

@@ -253,6 +253,7 @@ func (k Keeper) Params(c context.Context, _ *types.QueryParamsRequest) (_ *types
 
 // EthCall implements eth_call rpc api.
 func (k Keeper) EthCall(c context.Context, req *types.EthCallRequest) (_ *types.MsgEthereumTxResponse, err error) {
+	defer func() { err = rpctypes.QueryError(c, err) }()
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
@@ -285,7 +286,7 @@ func (k Keeper) EthCall(c context.Context, req *types.EthCallRequest) (_ *types.
 	args.Nonce = (*hexutil.Uint64)(&nonce)
 
 	if err := args.CallDefaults(req.GasCap, cfg.BaseFee, types.GetEthChainConfig().ChainID); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, rpctypes.QueryErrorWithStatus(c, codes.InvalidArgument, err)
 	}
 
 	msg := args.ToMessage(cfg.BaseFee, false, false)
@@ -295,7 +296,7 @@ func (k Keeper) EthCall(c context.Context, req *types.EthCallRequest) (_ *types.
 	stateDB := statedb.New(ctx, &k, txConfig)
 	res, err := k.ApplyMessageWithConfig(ctx, stateDB, *msg, nil, false, false, cfg, txConfig, false, overrides)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, rpctypes.QueryErrorWithStatus(c, codes.Internal, err)
 	}
 
 	return res, nil
@@ -303,6 +304,7 @@ func (k Keeper) EthCall(c context.Context, req *types.EthCallRequest) (_ *types.
 
 // EstimateGas implements eth_estimateGas rpc api.
 func (k Keeper) EstimateGas(c context.Context, req *types.EthCallRequest) (_ *types.EstimateGasResponse, err error) {
+	defer func() { err = rpctypes.QueryError(c, err) }()
 	return k.EstimateGasInternal(c, req, types.RPC)
 }
 
@@ -387,7 +389,7 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 		args.Gas = new(hexutil.Uint64)
 	}
 	if err := args.CallDefaults(req.GasCap, cfg.BaseFee, types.GetEthChainConfig().ChainID); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, rpctypes.QueryErrorWithStatus(c, codes.InvalidArgument, err)
 	}
 	// convert the tx args to an ethereum message
 	msg := args.ToMessage(cfg.BaseFee, true, true)
