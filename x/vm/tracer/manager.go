@@ -17,9 +17,11 @@ import (
 // and removed while the execution is in progress, for example by a precompile
 // that needs to observe only the contract call following it.
 type Manager struct {
-	hooks       *tracing.Hooks
-	nestedHooks *tracing.Hooks
-	base        *tracing.Hooks
+	hooks              *tracing.Hooks
+	nestedHooks        *tracing.Hooks
+	base               *tracing.Hooks
+	currentDepth       int
+	nestedDepthOffsets []int
 
 	nextID   uint64
 	globals  []installedHooks
@@ -36,8 +38,9 @@ type installedHooks struct {
 // lifetime of the manager.
 func New(base *tracing.Hooks) *Manager {
 	m := &Manager{
-		hooks:       &tracing.Hooks{},
-		nestedHooks: &tracing.Hooks{},
+		hooks:        &tracing.Hooks{},
+		nestedHooks:  &tracing.Hooks{},
+		currentDepth: -1,
 	}
 	if base != nil {
 		baseCopy := *base
@@ -124,10 +127,70 @@ func (m *Manager) rebuild() {
 	}
 
 	composed := compose(ordered)
-	*m.hooks = composed
+	*m.hooks = m.withDepthTracking(composed)
 	composed.OnTxStart = nil
 	composed.OnTxEnd = nil
-	*m.nestedHooks = composed
+	*m.nestedHooks = m.withNestedDepthOffset(composed)
+}
+
+func (m *Manager) withDepthTracking(hooks tracing.Hooks) tracing.Hooks {
+	out := hooks
+	out.OnEnter = func(depth int, typ byte, from, to common.Address, input []byte, gas uint64, value *big.Int) {
+		m.currentDepth = depth
+		if hooks.OnEnter != nil {
+			hooks.OnEnter(depth, typ, from, to, input, gas, value)
+		}
+	}
+	out.OnExit = func(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+		if hooks.OnExit != nil {
+			hooks.OnExit(depth, output, gasUsed, err, reverted)
+		}
+		m.currentDepth = depth - 1
+	}
+	return out
+}
+
+func (m *Manager) withNestedDepthOffset(hooks tracing.Hooks) tracing.Hooks {
+	out := hooks
+	out.OnEnter = func(depth int, typ byte, from, to common.Address, input []byte, gas uint64, value *big.Int) {
+		if depth == 0 {
+			m.nestedDepthOffsets = append(m.nestedDepthOffsets, m.currentDepth+1)
+		}
+		depth += m.nestedDepthOffset()
+		m.currentDepth = depth
+		if hooks.OnEnter != nil {
+			hooks.OnEnter(depth, typ, from, to, input, gas, value)
+		}
+	}
+	out.OnExit = func(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+		nestedRoot := depth == 0
+		depth += m.nestedDepthOffset()
+		if hooks.OnExit != nil {
+			hooks.OnExit(depth, output, gasUsed, err, reverted)
+		}
+		m.currentDepth = depth - 1
+		if nestedRoot && len(m.nestedDepthOffsets) > 0 {
+			m.nestedDepthOffsets = m.nestedDepthOffsets[:len(m.nestedDepthOffsets)-1]
+		}
+	}
+	if hooks.OnOpcode != nil {
+		out.OnOpcode = func(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, returnData []byte, depth int, err error) {
+			hooks.OnOpcode(pc, op, gas, cost, scope, returnData, depth+m.nestedDepthOffset(), err)
+		}
+	}
+	if hooks.OnFault != nil {
+		out.OnFault = func(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, depth int, err error) {
+			hooks.OnFault(pc, op, gas, cost, scope, depth+m.nestedDepthOffset(), err)
+		}
+	}
+	return out
+}
+
+func (m *Manager) nestedDepthOffset() int {
+	if len(m.nestedDepthOffsets) == 0 {
+		return 0
+	}
+	return m.nestedDepthOffsets[len(m.nestedDepthOffsets)-1]
 }
 
 func compose(hooks []tracing.Hooks) tracing.Hooks {
