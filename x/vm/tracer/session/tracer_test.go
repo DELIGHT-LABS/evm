@@ -34,7 +34,8 @@ func TestInstall(t *testing.T) {
 	manager.Hooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
 	require.Equal(t, 1, calls)
 	cleanup()
-	require.Nil(t, manager.Hooks().OnEnter)
+	manager.Hooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+	require.Equal(t, 1, calls)
 }
 
 func TestWithDepthOffset(t *testing.T) {
