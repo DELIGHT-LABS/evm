@@ -11,10 +11,12 @@ import (
 	"github.com/holiman/uint256"
 
 	precompilecommon "github.com/cosmos/evm/precompiles/common"
+	testconstants "github.com/cosmos/evm/testutil/constants"
 	"github.com/cosmos/evm/x/erc20/types"
 	vmkeeper "github.com/cosmos/evm/x/vm/keeper"
 	"github.com/cosmos/evm/x/vm/statedb"
 	vmtracer "github.com/cosmos/evm/x/vm/tracer"
+	vmglobaltracer "github.com/cosmos/evm/x/vm/tracer/global"
 	vmsessiontracer "github.com/cosmos/evm/x/vm/tracer/session"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 
@@ -165,6 +167,50 @@ func (s *KeeperTestSuite) TestCallEVMWithDataProvidesSessionTracerManager() {
 			}
 		})
 	}
+}
+
+func (s *KeeperTestSuite) TestCallEVMViewWithDataStartsIndependentTracingLifecycle() {
+	s.SetupTest()
+
+	ctx := s.Network.GetContext()
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	var managers []*vmtracer.Manager
+	var collectors []vmglobaltracer.Collector
+	evmKeeper.SetGlobalTracerFactories(func(factoryCtx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+		manager, ok := vmtracer.FromContext(factoryCtx)
+		s.Require().True(ok)
+		managers = append(managers, manager)
+		collector := vmglobaltracer.NewCollector()
+		collectors = append(collectors, collector)
+		return factoryCtx, collector
+	})
+
+	hook := &NestedEVMGasHook{
+		keeper:   evmKeeper,
+		contract: common.HexToAddress(testconstants.WEVMOSContractMainnet),
+	}
+	evmKeeper.SetHooks(vmkeeper.NewMultiEvmHooks(hook))
+
+	recipient := s.Keyring.GetAddr(1)
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), evmtypes.EvmTxArgs{
+		To:       &recipient,
+		GasLimit: 500_000,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	response, err := evmKeeper.ApplyTransaction(
+		ctx.WithGasMeter(storetypes.NewGasMeter(1_000_000)),
+		tx.GetMsgs()[0].(*evmtypes.MsgEthereumTx).AsTransaction(),
+	)
+
+	s.Require().NoError(err)
+	s.Require().False(response.Failed())
+	s.Require().Len(managers, 2)
+	s.Require().NotSame(managers[0], managers[1])
+	s.Require().Len(collectors, 2)
+	s.Require().Len(collectors[0].Touches(), 1)
+	s.Require().Equal(recipient, collectors[0].Touches()[0].To)
+	s.Require().NotEmpty(collectors[1].Touches())
 }
 
 func (s *KeeperTestSuite) TestNestedCallEVMWithDataReusesTransactionTracing() {

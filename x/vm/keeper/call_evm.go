@@ -16,6 +16,7 @@ import (
 	evmtrace "github.com/cosmos/evm/trace"
 	evmante "github.com/cosmos/evm/x/vm/ante"
 	"github.com/cosmos/evm/x/vm/statedb"
+	vmtracer "github.com/cosmos/evm/x/vm/tracer"
 	"github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
@@ -138,7 +139,7 @@ func (k *Keeper) CallEVMViewWithData(ctx sdk.Context, from common.Address, contr
 	}
 	limitedByParent := effectiveGasCap.IsUint64() && effectiveGasCap.Uint64() == remainingGas
 
-	execCtx := buildTraceCtx(ctx, remainingGas)
+	execCtx := vmtracer.WithoutManager(buildTraceCtx(ctx, remainingGas))
 	stateDB := statedb.New(execCtx, k, statedb.NewEmptyTxConfig())
 
 	res, err := k.CallEVMWithData(execCtx, stateDB, from, contract, data, false, false, effectiveGasCap)
