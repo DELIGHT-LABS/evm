@@ -175,4 +175,8 @@ func TestManagerContextRoundTrip(t *testing.T) {
 	actual, ok := FromContext(ctx)
 	require.True(t, ok)
 	require.Same(t, manager, actual)
+
+	ctx = WithoutManager(ctx)
+	_, ok = FromContext(ctx)
+	require.False(t, ok)
 }
