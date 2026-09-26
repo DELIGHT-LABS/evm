@@ -127,6 +127,16 @@ func TestManagerNestedHooksOmitTransactionBoundary(t *testing.T) {
 	require.Equal(t, 1, enters)
 }
 
+func TestManagerHasActiveFrame(t *testing.T) {
+	manager := New(nil)
+	require.False(t, manager.HasActiveFrame())
+
+	manager.Hooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+	require.True(t, manager.HasActiveFrame())
+	manager.Hooks().OnExit(0, nil, 0, nil, false)
+	require.False(t, manager.HasActiveFrame())
+}
+
 func TestManagerNestedHooksAdjustDepthRelativeToParentFrame(t *testing.T) {
 	var enters, exits, opcodes, faults []int
 	manager := New(&tracing.Hooks{

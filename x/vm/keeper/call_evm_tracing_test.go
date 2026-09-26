@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/stretchr/testify/require"
 
@@ -19,6 +20,8 @@ func TestPrepareCallEVMTracingReusesContextManager(t *testing.T) {
 	stateDB := statedb.New(ctx, nil, statedb.NewEmptyTxConfig())
 	manager := vmtracer.New(nil)
 	ctx = vmtracer.WithManager(ctx, manager)
+	manager.Hooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+	defer manager.Hooks().OnExit(0, nil, 0, nil, false)
 	factoryCalls := 0
 	k.SetGlobalTracerFactories(func(factoryCtx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
 		factoryCalls++
@@ -44,6 +47,8 @@ func TestPrepareCallEVMTracingPrefersStateDBManager(t *testing.T) {
 
 	k := Keeper{}
 	stateDBManager := vmtracer.New(nil)
+	stateDBManager.Hooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+	defer stateDBManager.Hooks().OnExit(0, nil, 0, nil, false)
 	stateDBCtx := vmtracer.WithManager(
 		sdk.Context{}.WithContext(context.Background()).WithEventManager(sdk.NewEventManager()),
 		stateDBManager,
@@ -51,6 +56,8 @@ func TestPrepareCallEVMTracingPrefersStateDBManager(t *testing.T) {
 	stateDB := statedb.New(stateDBCtx, nil, statedb.NewEmptyTxConfig())
 
 	callManager := vmtracer.New(nil)
+	callManager.Hooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+	defer callManager.Hooks().OnExit(0, nil, 0, nil, false)
 	callCtx := vmtracer.WithManager(
 		sdk.Context{}.WithContext(context.Background()).WithValue(callValueKey, callValue),
 		callManager,
@@ -70,4 +77,52 @@ func TestPrepareCallEVMTracingPrefersStateDBManager(t *testing.T) {
 	require.Same(t, stateDBManager.NestedHooks(), hooks)
 	require.Same(t, callValue, actualCtx.Value(callValueKey))
 	require.Zero(t, factoryCalls)
+}
+
+func TestPrepareCallEVMTracingReplacesInactiveManagers(t *testing.T) {
+	k := Keeper{}
+	ctx := sdk.Context{}.WithContext(context.Background()).WithEventManager(sdk.NewEventManager())
+	staleManager := vmtracer.New(nil)
+	ctx = vmtracer.WithManager(ctx, staleManager)
+	stateDB := statedb.New(ctx, nil, statedb.NewEmptyTxConfig())
+
+	var factoryManager *vmtracer.Manager
+	factoryCalls := 0
+	k.SetGlobalTracerFactories(func(factoryCtx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+		factoryCalls++
+		factoryManager, _ = vmtracer.FromContext(factoryCtx)
+		return factoryCtx, nil
+	})
+
+	actualCtx, hooks := k.prepareCallEVMTracing(ctx, stateDB, core.Message{}, statedb.NewEmptyTxConfig(), true)
+
+	actualManager, ok := vmtracer.FromContext(actualCtx)
+	require.True(t, ok)
+	require.NotSame(t, staleManager, actualManager)
+	require.Same(t, factoryManager, actualManager)
+	require.Same(t, actualManager.Hooks(), hooks)
+	stateDBManager, ok := vmtracer.FromContext(stateDB.GetContext())
+	require.True(t, ok)
+	require.Same(t, actualManager, stateDBManager)
+	require.Equal(t, 1, factoryCalls)
+}
+
+func TestPrepareCallEVMTracingUsesActiveContextManagerOverInactiveStateDBManager(t *testing.T) {
+	k := Keeper{}
+	ctx := sdk.Context{}.WithContext(context.Background()).WithEventManager(sdk.NewEventManager())
+	stateDB := statedb.New(vmtracer.WithManager(ctx, vmtracer.New(nil)), nil, statedb.NewEmptyTxConfig())
+	activeManager := vmtracer.New(nil)
+	activeManager.Hooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+	defer activeManager.Hooks().OnExit(0, nil, 0, nil, false)
+	ctx = vmtracer.WithManager(ctx, activeManager)
+
+	actualCtx, hooks := k.prepareCallEVMTracing(ctx, stateDB, core.Message{}, statedb.NewEmptyTxConfig(), true)
+
+	actualManager, ok := vmtracer.FromContext(actualCtx)
+	require.True(t, ok)
+	require.Same(t, activeManager, actualManager)
+	require.Same(t, activeManager.NestedHooks(), hooks)
+	stateDBManager, ok := vmtracer.FromContext(stateDB.GetContext())
+	require.True(t, ok)
+	require.Same(t, activeManager, stateDBManager)
 }
