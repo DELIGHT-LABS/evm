@@ -23,12 +23,12 @@ func (k Keeper) prepareCallEVMTracing(
 		return ctx, nil
 	}
 
-	if manager, ok := vmtracer.FromContext(stateDB.GetContext()); ok {
+	if manager, ok := vmtracer.FromContext(stateDB.GetContext()); ok && manager.HasActiveFrame() {
 		ctx = vmtracer.WithManager(ctx, manager)
 		return ctx, manager.NestedHooks()
 	}
 
-	if manager, ok := vmtracer.FromContext(ctx); ok {
+	if manager, ok := vmtracer.FromContext(ctx); ok && manager.HasActiveFrame() {
 		stateDB.AttachTracerManager(manager)
 		return ctx, manager.NestedHooks()
 	}

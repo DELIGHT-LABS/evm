@@ -94,7 +94,7 @@ func (s *KeeperTestSuite) TestCallEVMWithDataProvidesSessionTracerManager() {
 	testCases := []struct {
 		name            string
 		initializeCache bool
-		existingManager bool
+		staleManager    bool
 	}{
 		{
 			name: "new manager without global factories",
@@ -104,8 +104,8 @@ func (s *KeeperTestSuite) TestCallEVMWithDataProvidesSessionTracerManager() {
 			initializeCache: true,
 		},
 		{
-			name:            "reuse existing manager",
-			existingManager: true,
+			name:         "replace inactive manager",
+			staleManager: true,
 		},
 	}
 
@@ -135,11 +135,11 @@ func (s *KeeperTestSuite) TestCallEVMWithDataProvidesSessionTracerManager() {
 				s.Require().NoError(err)
 			}
 
-			var expectedManager *vmtracer.Manager
+			var oldManager *vmtracer.Manager
 			factoryCalls := 0
-			if tc.existingManager {
-				expectedManager = vmtracer.New(nil)
-				ctx = vmtracer.WithManager(ctx, expectedManager)
+			if tc.staleManager {
+				oldManager = vmtracer.New(nil)
+				ctx = vmtracer.WithManager(ctx, oldManager)
 				evmKeeper.SetGlobalTracerFactories(func(factoryCtx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
 					factoryCalls++
 					return factoryCtx, nil
@@ -161,12 +161,47 @@ func (s *KeeperTestSuite) TestCallEVMWithDataProvidesSessionTracerManager() {
 			s.Require().True(precompile.installed)
 			s.Require().NotNil(precompile.manager)
 			s.Require().Equal(1, precompile.enterCalls)
-			if tc.existingManager {
-				s.Require().Same(expectedManager, precompile.manager)
-				s.Require().Zero(factoryCalls)
+			if tc.staleManager {
+				s.Require().NotSame(oldManager, precompile.manager)
+				s.Require().Equal(1, factoryCalls)
 			}
 		})
 	}
+}
+
+func (s *KeeperTestSuite) TestSequentialCallEVMWithDataStartsSeparateTracingLifecycles() {
+	s.SetupTest()
+
+	ctx := s.Network.GetContext()
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	stateDB := statedb.New(ctx, evmKeeper, statedb.NewEmptyTxConfig())
+	var managers []*vmtracer.Manager
+	var txStarts, txEnds int
+	evmKeeper.SetGlobalTracerFactories(func(factoryCtx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+		manager, ok := vmtracer.FromContext(factoryCtx)
+		s.Require().True(ok)
+		managers = append(managers, manager)
+		return factoryCtx, vmsessiontracer.New(&tracing.Hooks{
+			OnTxStart: func(_ *tracing.VMContext, _ *ethtypes.Transaction, _ common.Address) {
+				txStarts++
+			},
+			OnTxEnd: func(_ *ethtypes.Receipt, _ error) {
+				txEnds++
+			},
+		})
+	})
+
+	recipient := s.Keyring.GetAddr(1)
+	for range 2 {
+		res, err := evmKeeper.CallEVMWithData(ctx, stateDB, types.ModuleAddress, &recipient, nil, true, false, nil)
+		s.Require().NoError(err)
+		s.Require().False(res.Failed())
+	}
+
+	s.Require().Len(managers, 2)
+	s.Require().NotSame(managers[0], managers[1])
+	s.Require().Equal(2, txStarts)
+	s.Require().Equal(2, txEnds)
 }
 
 func (s *KeeperTestSuite) TestCallEVMViewWithDataStartsIndependentTracingLifecycle() {

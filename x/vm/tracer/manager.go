@@ -68,6 +68,12 @@ func (m *Manager) NestedHooks() *tracing.Hooks {
 	return m.nestedHooks
 }
 
+// HasActiveFrame reports whether the manager is tracing an EVM call frame.
+// A manager can remain in a StateDB context after its execution has ended.
+func (m *Manager) HasActiveFrame() bool {
+	return m != nil && m.currentDepth >= 0
+}
+
 func (m *Manager) install(tracer Tracer, session bool) func() {
 	if m == nil || tracer == nil {
 		return func() {}
