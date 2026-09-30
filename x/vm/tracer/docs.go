@@ -64,11 +64,16 @@
 //
 //	uninstall, ok := vmsessiontracer.Install(
 //		ctx,
-//		vmsessiontracer.WithDepthOffset(sessionHooks, 1),
+//		vmsessiontracer.New(sessionHooks),
 //	)
 //	if ok {
 //		defer uninstall()
 //	}
+//
+// The manager reports logical call depths across precompile reentry and nested
+// EVM instances. Applications do not need to add an offset for these calls.
+// session.WithDepthOffset is available when a consumer needs an additional,
+// explicit offset in its own trace representation.
 //
 // Managers belong to one EVM execution and are not safe for concurrent use,
 // matching vm.EVM's concurrency guarantees.
