@@ -137,6 +137,101 @@ func TestManagerHasActiveFrame(t *testing.T) {
 	require.False(t, manager.HasActiveFrame())
 }
 
+func TestManagerRemainsActiveAfterSameDepthChildReturns(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "success"},
+		{name: "revert", err: gethvm.ErrExecutionReverted},
+		{name: "out of gas", err: gethvm.ErrOutOfGas},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := New(nil)
+			hooks := manager.Hooks()
+			hooks.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+			hooks.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+			hooks.OnExit(0, nil, 0, tc.err, tc.err != nil)
+			require.True(t, manager.HasActiveFrame(), "the parent precompile is still running")
+			hooks.OnExit(0, nil, 0, nil, false)
+			require.False(t, manager.HasActiveFrame())
+		})
+	}
+}
+
+func TestManagerRestoresDepthAfterReentrantFrame(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		nestedVM bool
+	}{
+		{name: "same VM at nonzero depth"},
+		{name: "nested VM at zero depth", nestedVM: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var enters, exits, opcodes, faults, sessionOpcodes []int
+			manager := New(&tracing.Hooks{
+				OnEnter: func(depth int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
+					enters = append(enters, depth)
+				},
+				OnExit: func(depth int, _ []byte, _ uint64, _ error, _ bool) {
+					exits = append(exits, depth)
+				},
+				OnOpcode: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ []byte, depth int, _ error) {
+					opcodes = append(opcodes, depth)
+				},
+				OnFault: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, depth int, _ error) {
+					faults = append(faults, depth)
+				},
+			})
+			root := manager.Hooks()
+			root.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+			root.OnEnter(1, 0, common.Address{}, common.Address{}, nil, 0, nil)
+			dispatcher, rawDepth, logicalDepth := root, 1, 1
+			if tc.nestedVM {
+				dispatcher, rawDepth, logicalDepth = manager.NestedHooks(), 0, 2
+				dispatcher.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+			}
+
+			// A precompile reenters its VM at the same reported depth. Installing
+			// and removing a session rebuilds the dispatcher while this frame is open.
+			dispatcher.OnEnter(rawDepth, 0, common.Address{}, common.Address{}, nil, 0, nil)
+			uninstall := manager.InstallSession(newTestTracer(&tracing.Hooks{
+				OnOpcode: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ []byte, depth int, _ error) {
+					sessionOpcodes = append(sessionOpcodes, depth)
+				},
+			}))
+			dispatcher.OnOpcode(0, 0, 0, 0, nil, nil, rawDepth+1, nil)
+			dispatcher.OnFault(0, 0, 0, 0, nil, rawDepth+1, gethvm.ErrInvalidJump)
+			uninstall()
+			dispatcher.OnExit(rawDepth, nil, 0, gethvm.ErrInvalidJump, true)
+			require.True(t, manager.HasActiveFrame())
+			dispatcher.OnOpcode(0, 0, 0, 0, nil, nil, rawDepth+1, nil)
+
+			// Starting another VM after that child failed must use the restored
+			// parent frame, with no residual offset from the previous call.
+			manager.NestedHooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+			manager.NestedHooks().OnOpcode(0, 0, 0, 0, nil, nil, 1, nil)
+			manager.NestedHooks().OnExit(0, nil, 0, nil, false)
+			if tc.nestedVM {
+				dispatcher.OnExit(0, nil, 0, nil, false)
+			}
+			root.OnExit(1, nil, 0, nil, false)
+			root.OnExit(0, nil, 0, nil, false)
+			require.False(t, manager.HasActiveFrame())
+			require.Equal(t, []int{logicalDepth + 2, logicalDepth + 1, logicalDepth + 2}, opcodes)
+			require.Equal(t, []int{logicalDepth + 2}, faults)
+			require.Equal(t, []int{logicalDepth + 2}, sessionOpcodes)
+			if tc.nestedVM {
+				require.Equal(t, []int{0, 1, 2, 3, 3}, enters)
+				require.Equal(t, []int{3, 3, 2, 1, 0}, exits)
+			} else {
+				require.Equal(t, []int{0, 1, 2, 2}, enters)
+				require.Equal(t, []int{2, 2, 1, 0}, exits)
+			}
+		})
+	}
+}
+
 func TestManagerNestedHooksAdjustDepthRelativeToParentFrame(t *testing.T) {
 	var enters, exits, opcodes, faults []int
 	manager := New(&tracing.Hooks{

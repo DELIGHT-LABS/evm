@@ -1,13 +1,18 @@
 package vm
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	gethvm "github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/eth/tracers"
+	_ "github.com/ethereum/go-ethereum/eth/tracers/native"
 	"github.com/holiman/uint256"
 
 	precompilecommon "github.com/cosmos/evm/precompiles/common"
@@ -26,10 +31,14 @@ import (
 
 type sessionTracerPrecompile struct {
 	precompilecommon.Precompile
-	target     common.Address
-	manager    *vmtracer.Manager
-	installed  bool
-	enterCalls int
+	target                common.Address
+	manager               *vmtracer.Manager
+	installed             bool
+	enterCalls            int
+	enterDepths           []int
+	keeper                *vmkeeper.Keeper
+	keeperTarget          common.Address
+	activeAfterDirectCall bool
 }
 
 func (p *sessionTracerPrecompile) Name() string { return "session-tracer-test" }
@@ -40,8 +49,9 @@ func (p *sessionTracerPrecompile) Run(evm *gethvm.EVM, contract *gethvm.Contract
 	return p.RunNativeAction(evm, contract, func(ctx sdk.Context) ([]byte, error) {
 		p.manager, _ = vmtracer.FromContext(ctx)
 		uninstall, ok := vmsessiontracer.Install(ctx, vmsessiontracer.New(&tracing.Hooks{
-			OnEnter: func(_ int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
+			OnEnter: func(depth int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
 				p.enterCalls++
+				p.enterDepths = append(p.enterDepths, depth)
 			},
 		}))
 		p.installed = ok
@@ -51,8 +61,105 @@ func (p *sessionTracerPrecompile) Run(evm *gethvm.EVM, contract *gethvm.Contract
 		defer uninstall()
 
 		_, _, err := evm.Call(contract.Address(), p.target, nil, contract.Gas, uint256.NewInt(0))
+		p.activeAfterDirectCall = p.manager.HasActiveFrame()
+		if err == nil && p.keeper != nil {
+			stateDB, ok := evm.StateDB.(*statedb.StateDB)
+			if !ok {
+				return nil, fmt.Errorf("unexpected StateDB type %T", evm.StateDB)
+			}
+			// A call rejected before OnEnter must not disturb the enclosing frame.
+			_, rejectedErr := p.keeper.CallEVMWithData(ctx, stateDB, p.Address(), &p.keeperTarget, nil, true, true, big.NewInt(1))
+			if !errors.Is(rejectedErr, core.ErrIntrinsicGas) {
+				return nil, fmt.Errorf("expected intrinsic gas failure, got %v", rejectedErr)
+			}
+			_, err = p.keeper.CallEVMWithData(ctx, stateDB, p.Address(), &p.keeperTarget, nil, true, true, new(big.Int).SetUint64(contract.Gas))
+		}
 		return []byte{1}, err
 	})
+}
+
+func (s *KeeperTestSuite) TestSameVMReentryPreservesSessionTracerForKeeperCalls() {
+	s.SetupTest()
+	ctx := s.Network.GetContext()
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	outerAddress := common.HexToAddress("0x000000000000000000000000000000000000fffe")
+	innerAddress := common.HexToAddress("0x000000000000000000000000000000000000ffff")
+	target := s.Keyring.GetAddr(1)
+	precompiles := make([]*sessionTracerPrecompile, 0, 2)
+	params := evmKeeper.GetParams(ctx)
+	for _, address := range []common.Address{outerAddress, innerAddress} {
+		precompile := &sessionTracerPrecompile{
+			Precompile: precompilecommon.Precompile{
+				KvGasConfig:          ctx.KVGasConfig(),
+				TransientKVGasConfig: ctx.TransientKVGasConfig(),
+				ContractAddress:      address,
+			},
+			target:       target,
+			keeper:       evmKeeper,
+			keeperTarget: target,
+		}
+		precompiles = append(precompiles, precompile)
+		evmKeeper.RegisterStaticPrecompile(address, precompile)
+		params.ActiveStaticPrecompiles = append(params.ActiveStaticPrecompiles, address.String())
+	}
+	// Both the top-level VM and the nested VM first reenter their own VM,
+	// then invoke CallEVMWithData while their session tracer is still installed.
+	precompiles[0].keeperTarget = innerAddress
+	s.Require().NoError(evmKeeper.SetParams(ctx, params))
+
+	var callTracer *tracers.Tracer
+	var manager *vmtracer.Manager
+	var factoryCalls, txStarts, txEnds int
+	evmKeeper.SetGlobalTracerFactories(func(factoryCtx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+		factoryCalls++
+		manager, _ = vmtracer.FromContext(factoryCtx)
+		ct, err := tracers.DefaultDirectory.New("callTracer", &tracers.Context{}, nil, evmtypes.GetEthChainConfig())
+		s.Require().NoError(err)
+		callTracer = ct
+		hooks := *ct.Hooks
+		hooks.OnTxStart = func(vm *tracing.VMContext, tx *ethtypes.Transaction, from common.Address) {
+			txStarts++
+			ct.OnTxStart(vm, tx, from)
+		}
+		hooks.OnTxEnd = func(receipt *ethtypes.Receipt, err error) {
+			txEnds++
+			ct.OnTxEnd(receipt, err)
+		}
+		return factoryCtx, vmsessiontracer.New(&hooks)
+	})
+
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), evmtypes.EvmTxArgs{
+		To:       &outerAddress,
+		GasLimit: 500_000,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	res, err := evmKeeper.ApplyTransaction(ctx.WithGasMeter(storetypes.NewGasMeter(1_000_000)), tx.GetMsgs()[0].(*evmtypes.MsgEthereumTx).AsTransaction())
+	s.Require().NoError(err)
+	s.Require().False(res.Failed())
+	s.Require().Equal(1, factoryCalls)
+	s.Require().Equal(1, txStarts)
+	s.Require().Equal(1, txEnds)
+	for _, precompile := range precompiles {
+		s.Require().Same(manager, precompile.manager)
+		s.Require().True(precompile.activeAfterDirectCall)
+	}
+	s.Require().False(manager.HasActiveFrame())
+	s.Require().Equal([]int{1, 1, 2, 2}, precompiles[0].enterDepths)
+	s.Require().Equal([]int{2, 2}, precompiles[1].enterDepths)
+
+	result, err := callTracer.GetResult()
+	s.Require().NoError(err)
+	type callFrame struct {
+		To    common.Address `json:"to"`
+		Calls []callFrame    `json:"calls"`
+	}
+	var root callFrame
+	s.Require().NoError(json.Unmarshal(result, &root))
+	s.Require().Equal(callFrame{To: outerAddress, Calls: []callFrame{
+		{To: target},
+		{To: innerAddress, Calls: []callFrame{{To: target}, {To: target}}},
+	}}, root)
 }
 
 type nestedCallEVMPrecompile struct {
