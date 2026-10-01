@@ -7,6 +7,7 @@ package utils
 import (
 	"fmt"
 
+	"github.com/cosmos/evm"
 	"github.com/cosmos/evm/testutil/integration/evm/network"
 	erc20types "github.com/cosmos/evm/x/erc20/types"
 	vmtypes "github.com/cosmos/evm/x/vm/types"
@@ -30,6 +31,11 @@ func RegisterEvmosERC20Coins(
 	network network.UnitTestNetwork,
 	tokenReceiver sdk.AccAddress,
 ) (erc20types.TokenPair, error) {
+	provider, ok := network.CoreApp().(evm.Erc20KeeperProvider)
+	if !ok || provider.GetErc20Keeper() == nil {
+		return erc20types.TokenPair{}, fmt.Errorf("app does not provide an ERC20 keeper")
+	}
+	erc20Keeper := provider.GetErc20Keeper()
 	bondDenom, err := network.App.GetStakingKeeper().BondDenom(network.GetContext())
 	if err != nil {
 		return erc20types.TokenPair{}, err
@@ -59,13 +65,13 @@ func RegisterEvmosERC20Coins(
 		return erc20types.TokenPair{}, fmt.Errorf("expected evmos denom metadata")
 	}
 
-	_, err = network.App.GetErc20Keeper().RegisterERC20Extension(network.GetContext(), cosmosEVMMetadata.Base)
+	_, err = erc20Keeper.RegisterERC20Extension(network.GetContext(), cosmosEVMMetadata.Base)
 	if err != nil {
 		return erc20types.TokenPair{}, err
 	}
 
-	cosmosEVMDenomID := network.App.GetErc20Keeper().GetDenomMap(network.GetContext(), bondDenom)
-	tokenPair, ok := network.App.GetErc20Keeper().GetTokenPair(network.GetContext(), cosmosEVMDenomID)
+	cosmosEVMDenomID := erc20Keeper.GetDenomMap(network.GetContext(), bondDenom)
+	tokenPair, ok := erc20Keeper.GetTokenPair(network.GetContext(), cosmosEVMDenomID)
 	if !ok {
 		return erc20types.TokenPair{}, fmt.Errorf("expected evmos erc20 token pair")
 	}
@@ -84,8 +90,17 @@ func RegisterIBCERC20Coins(
 	tokenReceiver sdk.AccAddress,
 	denom transfertypes.Denom,
 ) (erc20types.TokenPair, error) {
+	provider, ok := network.CoreApp().(evm.Erc20KeeperProvider)
+	if !ok || provider.GetErc20Keeper() == nil {
+		return erc20types.TokenPair{}, fmt.Errorf("app does not provide an ERC20 keeper")
+	}
+	erc20Keeper := provider.GetErc20Keeper()
+	transferProvider, ok := network.CoreApp().(evm.TransferKeeperProvider)
+	if !ok || transferProvider.GetTransferKeeper() == nil {
+		return erc20types.TokenPair{}, fmt.Errorf("app does not provide a transfer keeper")
+	}
 	ibcDenom := denom.IBCDenom()
-	keeper := network.App.GetTransferKeeper()
+	keeper := transferProvider.GetTransferKeeper()
 	keeper.SetDenom(network.GetContext(), denom)
 	ibcMetadata := banktypes.Metadata{
 		Name:        "Generic IBC name",
@@ -126,16 +141,16 @@ func RegisterIBCERC20Coins(
 		return erc20types.TokenPair{}, err
 	}
 
-	_, err = network.App.GetErc20Keeper().RegisterERC20Extension(network.GetContext(), ibcMetadata.Base)
+	_, err = erc20Keeper.RegisterERC20Extension(network.GetContext(), ibcMetadata.Base)
 	if err != nil {
 		return erc20types.TokenPair{}, err
 	}
 
-	ibcDenomID := network.App.GetErc20Keeper().GetDenomMap(
+	ibcDenomID := erc20Keeper.GetDenomMap(
 		network.GetContext(),
 		denom.IBCDenom(),
 	)
-	tokenPair, ok := network.App.GetErc20Keeper().GetTokenPair(network.GetContext(), ibcDenomID)
+	tokenPair, ok := erc20Keeper.GetTokenPair(network.GetContext(), ibcDenomID)
 	if !ok {
 		return erc20types.TokenPair{}, fmt.Errorf("expected %s erc20 token pair", ibcDenom)
 	}
