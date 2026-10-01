@@ -108,10 +108,10 @@ func TestAccrualWithoutMint(t *testing.T) {
 			denom := nw.GetBaseDenom()
 			supplyBefore := bank.GetSupply(nw.GetContext(), denom).Amount
 			if name == "zero target" {
-				empty, err := utils.WaitToAccrueRewards(nw, gh, "", nil)
+				empty, err := utils.WaitToAccrueRewards(&nw.IntegrationNetwork, gh, "", nil)
 				require.NoError(t, err)
 				require.Empty(t, empty)
-				empty, err = utils.WaitToAccrueCommission(nw, gh, "", nil)
+				empty, err = utils.WaitToAccrueCommission(&nw.IntegrationNetwork, gh, "", nil)
 				require.NoError(t, err)
 				require.Empty(t, empty)
 				require.Equal(t, height, nw.GetContext().BlockHeight())
@@ -136,9 +136,9 @@ func TestAccrualWithoutMint(t *testing.T) {
 			height = nw.GetContext().BlockHeight()
 			var accrued sdk.DecCoins
 			if commission {
-				accrued, err = utils.WaitToAccrueCommission(nw, gh, valAddr.String(), expected)
+				accrued, err = utils.WaitToAccrueCommission(&nw.IntegrationNetwork, gh, valAddr.String(), expected)
 			} else {
-				accrued, err = utils.WaitToAccrueRewards(nw, gh, delegator.String(), expected)
+				accrued, err = utils.WaitToAccrueRewards(&nw.IntegrationNetwork, gh, delegator.String(), expected)
 			}
 			require.Equal(t, int64(1), nw.GetContext().BlockHeight()-height)
 			require.True(t, bank.GetSupply(nw.GetContext(), denom).Amount.Sub(supplyBefore).Equal(math.NewInt(1e18)), "fallback must fund once")

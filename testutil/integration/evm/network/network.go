@@ -70,6 +70,12 @@ type IntegrationNetwork struct {
 	valSigners map[string]cmttypes.PrivValidator
 }
 
+// CoreApp returns the underlying app for checking optional keeper providers.
+// UnitTestNetwork.App is an adapter and can expose providers the app lacks.
+func (n *IntegrationNetwork) CoreApp() evm.IntegrationNetworkApp {
+	return n.app
+}
+
 // New configures and initializes a new integration Network instance with
 // the given configuration options. If no configuration options are provided
 // it uses the default configuration.

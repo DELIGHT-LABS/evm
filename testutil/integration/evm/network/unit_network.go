@@ -33,12 +33,6 @@ func NewUnitTestNetwork(createEvmApp CreateEvmApp, opts ...ConfigOption) *UnitTe
 	}
 }
 
-// CoreApp returns the underlying app for checking optional keeper providers.
-// App is an adapter and exposes providers even when the underlying app lacks them.
-func (n *UnitTestNetwork) CoreApp() evm.IntegrationNetworkApp {
-	return n.app
-}
-
 // GetStateDB returns the state database for the current block.
 func (n *UnitTestNetwork) GetStateDB() *statedb.StateDB {
 	return statedb.New(
