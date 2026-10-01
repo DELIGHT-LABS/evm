@@ -9,13 +9,13 @@ import (
 
 	"github.com/cosmos/evm/testutil/integration/evm/network"
 	erc20types "github.com/cosmos/evm/x/erc20/types"
+	vmtypes "github.com/cosmos/evm/x/vm/types"
 	transfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
 
 	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 )
 
 const (
@@ -38,7 +38,7 @@ func RegisterEvmosERC20Coins(
 	coin := sdk.NewCoin(bondDenom, math.NewInt(TokenToMint))
 	err = network.App.GetBankKeeper().MintCoins(
 		network.GetContext(),
-		minttypes.ModuleName,
+		vmtypes.ModuleName,
 		sdk.NewCoins(coin),
 	)
 	if err != nil {
@@ -46,7 +46,7 @@ func RegisterEvmosERC20Coins(
 	}
 	err = network.App.GetBankKeeper().SendCoinsFromModuleToAccount(
 		network.GetContext(),
-		minttypes.ModuleName,
+		vmtypes.ModuleName,
 		tokenReceiver,
 		sdk.NewCoins(coin),
 	)
@@ -109,7 +109,7 @@ func RegisterIBCERC20Coins(
 	coin := sdk.NewCoin(ibcMetadata.Base, math.NewInt(TokenToMint))
 	err := network.App.GetBankKeeper().MintCoins(
 		network.GetContext(),
-		minttypes.ModuleName,
+		vmtypes.ModuleName,
 		sdk.NewCoins(coin),
 	)
 	if err != nil {
@@ -118,7 +118,7 @@ func RegisterIBCERC20Coins(
 
 	err = network.App.GetBankKeeper().SendCoinsFromModuleToAccount(
 		network.GetContext(),
-		minttypes.ModuleName,
+		vmtypes.ModuleName,
 		tokenReceiver,
 		sdk.NewCoins(coin),
 	)
