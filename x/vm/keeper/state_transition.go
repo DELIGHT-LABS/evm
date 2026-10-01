@@ -35,6 +35,9 @@ import (
 // for call hooks; otherwise, it will use the recipient-specific precompile hook.
 // This is useful for scenarios such as eth_call, state overrides, or testing where custom precompile logic is needed.
 // The function sets up the block context, transaction context, and VM configuration before returning the EVM instance.
+// Direct callers must explicitly connect a tracer manager to both StateDB's
+// context and tracingHooks; this constructor does not install global factories
+// or emit transaction-boundary events. See the x/vm/tracer package documentation.
 func (k *Keeper) NewEVMWithOverridePrecompiles(
 	ctx sdk.Context,
 	msg core.Message,
@@ -96,6 +99,8 @@ func (k *Keeper) NewEVMWithOverridePrecompiles(
 // (ChainConfig and module Params). It additionally sets the validator operator address as the
 // coinbase address to make it available for the COINBASE opcode, even though there is no
 // beneficiary of the coinbase transaction (since we're not mining).
+// Like NewEVMWithOverridePrecompiles, this is a low-level constructor and does
+// not initialize a composable tracer manager. See the x/vm/tracer package docs.
 //
 // NOTE: the RANDOM opcode is currently not supported since it requires
 // RANDAO implementation. See https://github.com/evmos/ethermint/pull/1520#pullrequestreview-1200504697
@@ -290,6 +295,9 @@ func (k *Keeper) applyTransactionWithoutPostTxHooks(
 }
 
 // ApplyMessage calls ApplyMessageWithConfig with an empty TxConfig.
+// Direct callers must explicitly initialize composable tracing in the context,
+// StateDB, and tracingHooks. Prefer ApplyTransaction or CallEVM/CallEVMWithData
+// when applicable; see the x/vm/tracer package documentation for manual setup.
 // Note: if you call this from a precompile context, ensure that
 // you use the existing stateDB.
 func (k *Keeper) ApplyMessage(ctx sdk.Context, stateDB *statedb.StateDB, msg core.Message, tracingHooks *tracing.Hooks, commit, callFromPrecompile, internal bool) (*types.MsgEthereumTxResponse, error) {
@@ -341,7 +349,11 @@ func (k *Keeper) ApplyMessage(ctx sdk.Context, stateDB *statedb.StateDB, msg cor
 //
 // # Tracer parameter
 //
-// It should be a `vm.Tracer` object or nil, if pass `nil`, it'll create a default one based on keeper options.
+// tracingHooks dispatches EVM tracing callbacks. Nil selects the keeper's legacy
+// tracer option; it does not initialize a composable tracer manager or invoke
+// SetGlobalTracerFactories registrations. Direct callers must put a manager in
+// the execution/StateDB context and pass that manager's hooks explicitly. See
+// the x/vm/tracer package documentation for recommended APIs and manual setup.
 //
 // # Commit parameter
 //

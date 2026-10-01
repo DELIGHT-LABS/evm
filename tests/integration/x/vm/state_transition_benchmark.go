@@ -11,8 +11,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/cosmos/evm/testutil/integration/evm/network"
 	utiltx "github.com/cosmos/evm/testutil/tx"
 	"github.com/cosmos/evm/x/vm/statedb"
+	vmtracer "github.com/cosmos/evm/x/vm/tracer"
+	vmglobaltracer "github.com/cosmos/evm/x/vm/tracer/global"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
@@ -263,9 +266,11 @@ func BenchmarkApplyTransactionWithDynamicFeeTx(b *testing.B) {
 	}
 }
 
-func BenchmarkApplyMessage(b *testing.B) {
-	suite := KeeperTestSuite{EnableLondonHF: true}
-	suite.SetupTest()
+// BenchmarkApplyMessage includes manager, collector, and StateDB initialization
+// in each measured execution. Low-level ApplyMessage does not install tracers.
+func BenchmarkApplyMessage(b *testing.B, create network.CreateEvmApp) {
+	suite := KeeperTestSuite{Create: create, EnableLondonHF: true}
+	suite.setupTest(b)
 
 	ethCfg := evmtypes.GetEthChainConfig()
 	signer := ethtypes.LatestSignerForChainID(ethCfg.ChainID)
@@ -288,20 +293,27 @@ func BenchmarkApplyMessage(b *testing.B) {
 		)
 		require.NoError(b, err)
 
-		stateDB := statedb.New(suite.Network.GetContext(), suite.Network.App.GetEVMKeeper(), statedb.NewEmptyTxConfig())
-
 		b.StartTimer()
-		resp, err := suite.Network.App.GetEVMKeeper().ApplyMessage(suite.Network.GetContext(), stateDB, *m, nil, true, false, false)
+		manager := vmtracer.New(nil)
+		ctx := vmtracer.WithManager(suite.Network.GetContext(), manager)
+		txConfig := statedb.NewEmptyTxConfig()
+		ctx, collector := vmglobaltracer.TxTraceFactory(ctx, vmtracer.ExecutionInfo{Message: *m, TxIndex: uint64(txConfig.TxIndex), Commit: true})
+		manager.InstallGlobal(collector)
+		stateDB := statedb.New(ctx, suite.Network.App.GetEVMKeeper(), txConfig)
+		resp, err := suite.Network.App.GetEVMKeeper().ApplyMessage(ctx, stateDB, *m, manager.Hooks(), true, false, false)
 		b.StopTimer()
 
 		require.NoError(b, err)
 		require.False(b, resp.Failed())
+		require.False(b, manager.HasActiveFrame())
+		touches, _, _ := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
+		require.NotEmpty(b, touches)
 	}
 }
 
-func BenchmarkApplyMessageWithLegacyTx(b *testing.B) {
-	suite := KeeperTestSuite{EnableLondonHF: true}
-	suite.SetupTest()
+func BenchmarkApplyMessageWithLegacyTx(b *testing.B, create network.CreateEvmApp) {
+	suite := KeeperTestSuite{Create: create, EnableLondonHF: true}
+	suite.setupTest(b)
 
 	ethCfg := evmtypes.GetEthChainConfig()
 	signer := ethtypes.LatestSignerForChainID(ethCfg.ChainID)
@@ -324,20 +336,27 @@ func BenchmarkApplyMessageWithLegacyTx(b *testing.B) {
 		)
 		require.NoError(b, err)
 
-		stateDB := statedb.New(suite.Network.GetContext(), suite.Network.App.GetEVMKeeper(), statedb.NewEmptyTxConfig())
-
 		b.StartTimer()
-		resp, err := suite.Network.App.GetEVMKeeper().ApplyMessage(suite.Network.GetContext(), stateDB, *m, nil, true, false, false)
+		manager := vmtracer.New(nil)
+		ctx := vmtracer.WithManager(suite.Network.GetContext(), manager)
+		txConfig := statedb.NewEmptyTxConfig()
+		ctx, collector := vmglobaltracer.TxTraceFactory(ctx, vmtracer.ExecutionInfo{Message: *m, TxIndex: uint64(txConfig.TxIndex), Commit: true})
+		manager.InstallGlobal(collector)
+		stateDB := statedb.New(ctx, suite.Network.App.GetEVMKeeper(), txConfig)
+		resp, err := suite.Network.App.GetEVMKeeper().ApplyMessage(ctx, stateDB, *m, manager.Hooks(), true, false, false)
 		b.StopTimer()
 
 		require.NoError(b, err)
 		require.False(b, resp.Failed())
+		require.False(b, manager.HasActiveFrame())
+		touches, _, _ := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
+		require.NotEmpty(b, touches)
 	}
 }
 
-func BenchmarkApplyMessageWithDynamicFeeTx(b *testing.B) {
-	suite := KeeperTestSuite{EnableFeemarket: true, EnableLondonHF: true}
-	suite.SetupTest()
+func BenchmarkApplyMessageWithDynamicFeeTx(b *testing.B, create network.CreateEvmApp) {
+	suite := KeeperTestSuite{Create: create, EnableFeemarket: true, EnableLondonHF: true}
+	suite.setupTest(b)
 
 	ethCfg := evmtypes.GetEthChainConfig()
 	signer := ethtypes.LatestSignerForChainID(ethCfg.ChainID)
@@ -360,13 +379,20 @@ func BenchmarkApplyMessageWithDynamicFeeTx(b *testing.B) {
 		)
 		require.NoError(b, err)
 
-		stateDB := statedb.New(suite.Network.GetContext(), suite.Network.App.GetEVMKeeper(), statedb.NewEmptyTxConfig())
-
 		b.StartTimer()
-		resp, err := suite.Network.App.GetEVMKeeper().ApplyMessage(suite.Network.GetContext(), stateDB, *m, nil, true, false, false)
+		manager := vmtracer.New(nil)
+		ctx := vmtracer.WithManager(suite.Network.GetContext(), manager)
+		txConfig := statedb.NewEmptyTxConfig()
+		ctx, collector := vmglobaltracer.TxTraceFactory(ctx, vmtracer.ExecutionInfo{Message: *m, TxIndex: uint64(txConfig.TxIndex), Commit: true})
+		manager.InstallGlobal(collector)
+		stateDB := statedb.New(ctx, suite.Network.App.GetEVMKeeper(), txConfig)
+		resp, err := suite.Network.App.GetEVMKeeper().ApplyMessage(ctx, stateDB, *m, manager.Hooks(), true, false, false)
 		b.StopTimer()
 
 		require.NoError(b, err)
 		require.False(b, resp.Failed())
+		require.False(b, manager.HasActiveFrame())
+		touches, _, _ := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
+		require.NotEmpty(b, touches)
 	}
 }

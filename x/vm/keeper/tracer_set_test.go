@@ -75,3 +75,26 @@ func TestPrepareTracingInstallsApplicationFactories(t *testing.T) {
 	hooks.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
 	require.Equal(t, 1, calls)
 }
+
+func TestPrepareTracingWithBasePreservesDispatchOrder(t *testing.T) {
+	k := Keeper{}
+	ctx := sdk.Context{}.WithContext(context.Background())
+	var calls []string
+	newHooks := func(name string) *tracing.Hooks {
+		return &tracing.Hooks{
+			OnEnter: func(_ int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
+				calls = append(calls, name)
+			},
+		}
+	}
+	k.SetGlobalTracerFactories(func(ctx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+		return ctx, &testExecutionTracer{hooks: newHooks("global")}
+	})
+	ctx, hooks := k.prepareTracingWithBase(ctx, core.Message{}, statedb.NewEmptyTxConfig(), false, newHooks("base"))
+	uninstall, ok := vmsessiontracer.Install(ctx, vmsessiontracer.New(newHooks("session")))
+	require.True(t, ok)
+	defer uninstall()
+	hooks.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
+	hooks.OnExit(0, nil, 0, nil, false)
+	require.Equal(t, []string{"base", "global", "session"}, calls)
+}
