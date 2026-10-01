@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/cosmos/evm/testutil/integration/evm/factory"
@@ -45,6 +46,12 @@ func NewKeeperTestSuite(create network.CreateEvmApp, options ...network.ConfigOp
 }
 
 func (s *KeeperTestSuite) SetupTest() {
+	s.setupTest(s.T())
+}
+
+// setupTest also accepts testing.B so benchmarks can use the same app setup
+// without relying on testify's testing.T-only suite lifecycle.
+func (s *KeeperTestSuite) setupTest(t require.TestingT) {
 	keys := keyring.New(2)
 	// Set custom balance based on test params
 	customGenesis := network.CustomGenesisState{}
@@ -109,7 +116,7 @@ func (s *KeeperTestSuite) SetupTest() {
 	configurator := evmtypes.NewEVMConfigurator()
 	configurator.ResetTestConfig()
 	err := evmtypes.SetChainConfig(chainConfig)
-	s.Require().NoError(err)
+	require.NoError(t, err)
 	err = configurator.
 		WithEVMCoinInfo(evmtypes.EvmCoinInfo{
 			Denom:         denom,
@@ -118,5 +125,5 @@ func (s *KeeperTestSuite) SetupTest() {
 			Decimals:      decimals.Uint32(),
 		}).
 		Configure()
-	s.Require().NoError(err)
+	require.NoError(t, err)
 }

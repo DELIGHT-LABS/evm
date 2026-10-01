@@ -29,7 +29,18 @@ func (k Keeper) prepareTracing(
 	if k.tracer != "" {
 		base = k.Tracer(ctx, msg, types.GetEthChainConfig())
 	}
+	return k.prepareTracingWithBase(ctx, msg, txConfig, commit, base)
+}
 
+// prepareTracingWithBase preserves an explicitly selected tracer (such as a
+// debug RPC tracer) while installing the application's global and session hooks.
+func (k Keeper) prepareTracingWithBase(
+	ctx sdk.Context,
+	msg core.Message,
+	txConfig statedb.TxConfig,
+	commit bool,
+	base *tracing.Hooks,
+) (sdk.Context, *tracing.Hooks) {
 	manager := vmtracer.New(base)
 	ctx = vmtracer.WithManager(ctx, manager)
 	execution := vmtracer.ExecutionInfo{

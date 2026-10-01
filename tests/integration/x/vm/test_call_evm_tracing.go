@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
@@ -33,6 +34,7 @@ type sessionTracerPrecompile struct {
 	precompilecommon.Precompile
 	target                common.Address
 	manager               *vmtracer.Manager
+	managers              []*vmtracer.Manager
 	installed             bool
 	enterCalls            int
 	enterDepths           []int
@@ -48,6 +50,7 @@ func (p *sessionTracerPrecompile) RequiredGas(_ []byte) uint64 { return 0 }
 func (p *sessionTracerPrecompile) Run(evm *gethvm.EVM, contract *gethvm.Contract, _ bool) ([]byte, error) {
 	return p.RunNativeAction(evm, contract, func(ctx sdk.Context) ([]byte, error) {
 		p.manager, _ = vmtracer.FromContext(ctx)
+		p.managers = append(p.managers, p.manager)
 		uninstall, ok := vmsessiontracer.Install(ctx, vmsessiontracer.New(&tracing.Hooks{
 			OnEnter: func(depth int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
 				p.enterCalls++
@@ -76,6 +79,172 @@ func (p *sessionTracerPrecompile) Run(evm *gethvm.EVM, contract *gethvm.Contract
 		}
 		return []byte{1}, err
 	})
+}
+
+func (s *KeeperTestSuite) TestQueryPathsProvideSessionTracerManager() {
+	for _, withGlobal := range []bool{false, true} {
+		for _, path := range []string{"EstimateGas", "TraceCall", "TraceCallStructLogger", "TraceTx", "TraceTxPredecessor", "TraceBlock"} {
+			s.Run(fmt.Sprintf("%s/global=%t", path, withGlobal), func() {
+				s.SetupTest()
+				ctx := s.Network.GetContext()
+				k := s.Network.App.GetEVMKeeper()
+				s.Require().False(k.HasHooks(), "exercise estimation without post-tx hooks")
+				address := common.HexToAddress("0x000000000000000000000000000000000000ffff")
+				precompile := &sessionTracerPrecompile{
+					Precompile: precompilecommon.Precompile{
+						KvGasConfig: ctx.KVGasConfig(), TransientKVGasConfig: ctx.TransientKVGasConfig(), ContractAddress: address,
+					},
+					target: s.Keyring.GetAddr(1),
+				}
+				k.RegisterStaticPrecompile(address, precompile)
+				params := k.GetParams(ctx)
+				params.ActiveStaticPrecompiles = append(params.ActiveStaticPrecompiles, address.String())
+				s.Require().NoError(k.SetParams(ctx, params))
+
+				var managers []*vmtracer.Manager
+				var executions []vmtracer.ExecutionInfo
+				var starts, ends int
+				if withGlobal {
+					k.SetGlobalTracerFactories(func(ctx sdk.Context, info vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+						manager, ok := vmtracer.FromContext(ctx)
+						s.Require().True(ok)
+						managers = append(managers, manager)
+						executions = append(executions, info)
+						return ctx, vmsessiontracer.New(&tracing.Hooks{
+							OnTxStart: func(_ *tracing.VMContext, _ *ethtypes.Transaction, _ common.Address) { starts++ },
+							OnTxEnd:   func(_ *ethtypes.Receipt, _ error) { ends++ },
+						})
+					})
+				}
+
+				const gasLimit = uint64(200_000)
+				sender := s.Keyring.GetAddr(0)
+				zeroGasPrice := hexutil.Big(*big.NewInt(0))
+				// Nonempty input avoids EstimateGas's plain-transfer shortcut.
+				input := hexutil.Bytes{1}
+				args, err := json.Marshal(evmtypes.TransactionArgs{From: &sender, To: &address, GasPrice: &zeroGasPrice, Input: &input})
+				s.Require().NoError(err)
+				newTx := func(nonce uint64) *evmtypes.MsgEthereumTx {
+					tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), evmtypes.EvmTxArgs{
+						To: &address, Nonce: nonce, GasLimit: gasLimit, GasPrice: big.NewInt(0),
+					})
+					s.Require().NoError(err)
+					return tx.GetMsgs()[0].(*evmtypes.MsgEthereumTx)
+				}
+				var traceData []byte
+				expectedExecutions := 1
+				switch path {
+				case "EstimateGas":
+					res, err := k.EstimateGas(ctx, &evmtypes.EthCallRequest{
+						Args: args, GasCap: gasLimit, ProposerAddress: ctx.BlockHeader().ProposerAddress,
+					})
+					s.Require().NoError(err)
+					s.Require().Positive(res.Gas)
+					s.Require().Greater(len(precompile.managers), 1, "exercise multiple gas candidates")
+					expectedExecutions = len(precompile.managers)
+				case "TraceCall", "TraceCallStructLogger":
+					config := &evmtypes.TraceConfig{Tracer: "callTracer"}
+					if path == "TraceCallStructLogger" {
+						config.Tracer = ""
+					}
+					res, err := k.TraceCall(ctx, &evmtypes.QueryTraceCallRequest{
+						Args: args, GasCap: gasLimit, TraceConfig: config, BlockNumber: ctx.BlockHeight(),
+						BlockTime: ctx.BlockTime(), ProposerAddress: ctx.BlockHeader().ProposerAddress,
+					})
+					s.Require().NoError(err)
+					traceData = res.Data
+				case "TraceTx", "TraceTxPredecessor":
+					req := getDefaultTraceTxRequest(s.Network)
+					req.BlockNumber = ctx.BlockHeight()
+					req.TraceConfig.Tracer = "callTracer"
+					req.Msg = newTx(0)
+					if path == "TraceTxPredecessor" {
+						req.Predecessors = []*evmtypes.MsgEthereumTx{req.Msg}
+						req.Msg = newTx(1)
+						expectedExecutions = 2
+					}
+					res, err := k.TraceTx(ctx, req)
+					s.Require().NoError(err)
+					traceData = res.Data
+				case "TraceBlock":
+					req := getDefaultTraceBlockRequest(s.Network)
+					req.BlockNumber = ctx.BlockHeight()
+					req.TraceConfig = &evmtypes.TraceConfig{Tracer: "callTracer"}
+					req.Txs = []*evmtypes.MsgEthereumTx{newTx(0), newTx(1)}
+					expectedExecutions = 2
+					res, err := k.TraceBlock(ctx, &req)
+					s.Require().NoError(err)
+					var results []struct {
+						Result json.RawMessage `json:"result"`
+						Error  string          `json:"error"`
+					}
+					s.Require().NoError(json.Unmarshal(res.Data, &results))
+					s.Require().Len(results, 2)
+					for _, result := range results {
+						s.Require().Empty(result.Error)
+						s.Require().NotContains(string(result.Result), `"error"`)
+					}
+					traceData = results[1].Result
+				}
+				if path == "TraceCallStructLogger" {
+					var result struct {
+						Failed      bool   `json:"failed"`
+						ReturnValue string `json:"returnValue"`
+					}
+					s.Require().NoError(json.Unmarshal(traceData, &result))
+					s.Require().False(result.Failed)
+					s.Require().Equal("0x01", result.ReturnValue)
+				} else if traceData != nil {
+					var result struct {
+						To     common.Address `json:"to"`
+						Error  string         `json:"error"`
+						Output string         `json:"output"`
+						Calls  []struct {
+							To common.Address `json:"to"`
+						} `json:"calls"`
+					}
+					s.Require().NoError(json.Unmarshal(traceData, &result))
+					s.Require().Empty(result.Error)
+					s.Require().Equal("0x01", result.Output)
+					s.Require().Equal(address, result.To)
+					s.Require().Len(result.Calls, 1)
+					s.Require().Equal(precompile.target, result.Calls[0].To)
+				}
+				s.Require().Equal(expectedExecutions, precompile.enterCalls)
+				s.Require().Len(precompile.managers, expectedExecutions)
+				seen := make(map[*vmtracer.Manager]bool)
+				for _, manager := range precompile.managers {
+					s.Require().NotNil(manager)
+					s.Require().False(manager.HasActiveFrame())
+					s.Require().False(seen[manager], "each candidate/transaction needs a fresh manager")
+					seen[manager] = true
+				}
+				if withGlobal {
+					if path != "EstimateGas" {
+						s.Require().Equal(precompile.managers, managers)
+					}
+					factoryManagers := make(map[*vmtracer.Manager]bool)
+					for _, manager := range managers {
+						s.Require().False(factoryManagers[manager])
+						s.Require().False(manager.HasActiveFrame())
+						factoryManagers[manager] = true
+					}
+					for manager := range seen {
+						s.Require().True(factoryManagers[manager])
+					}
+					s.Require().Equal(len(managers), starts)
+					s.Require().Equal(starts, ends)
+					for i, execution := range executions {
+						expectedCommit := path == "TraceBlock" || path == "TraceTxPredecessor" && i == 0
+						s.Require().Equal(expectedCommit, execution.Commit)
+						if expectedExecutions == 2 && path != "EstimateGas" {
+							s.Require().Equal(uint64(i), execution.TxIndex)
+						}
+					}
+				}
+			})
+		}
+	}
 }
 
 func (s *KeeperTestSuite) TestSameVMReentryPreservesSessionTracerForKeeperCalls() {
