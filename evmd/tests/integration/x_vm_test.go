@@ -4,6 +4,10 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+
 	evm "github.com/cosmos/evm"
 	"github.com/cosmos/evm/server/config"
 	"github.com/cosmos/evm/tests/integration/x/vm"
@@ -12,10 +16,6 @@ import (
 	"github.com/cosmos/evm/testutil/keyring"
 	feemarkettypes "github.com/cosmos/evm/x/feemarket/types"
 	"github.com/cosmos/evm/x/vm/types"
-	"github.com/ethereum/go-ethereum/common"
-
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
 )
 
 func BenchmarkGasEstimation(b *testing.B) {
