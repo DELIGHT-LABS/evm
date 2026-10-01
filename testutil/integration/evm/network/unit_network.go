@@ -2,6 +2,7 @@ package network
 
 import (
 	"github.com/cosmos/evm"
+	testapp "github.com/cosmos/evm/testutil/app"
 	"github.com/cosmos/evm/x/vm/statedb"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 
@@ -28,8 +29,14 @@ func NewUnitTestNetwork(createEvmApp CreateEvmApp, opts ...ConfigOption) *UnitTe
 	network := New(createEvmApp, opts...)
 	return &UnitTestNetwork{
 		IntegrationNetwork: *network,
-		App:                network.app,
+		App:                testapp.NewEvmAppAdapter(network.app),
 	}
+}
+
+// CoreApp returns the underlying app for checking optional keeper providers.
+// App is an adapter and exposes providers even when the underlying app lacks them.
+func (n *UnitTestNetwork) CoreApp() evm.IntegrationNetworkApp {
+	return n.app
 }
 
 // GetStateDB returns the state database for the current block.
