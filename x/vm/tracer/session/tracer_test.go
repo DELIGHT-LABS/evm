@@ -17,19 +17,19 @@ import (
 
 func TestInstall(t *testing.T) {
 	ctx := sdk.Context{}.WithContext(context.Background())
-	cleanup, ok := Install(ctx, New(&tracing.Hooks{}))
-	require.False(t, ok)
+	cleanup, err := Install(ctx, New(&tracing.Hooks{}))
+	require.Error(t, err)
 	cleanup()
 
 	manager := vmtracer.New(nil)
 	ctx = vmtracer.WithManager(ctx, manager)
 	calls := 0
-	cleanup, ok = Install(ctx, New(&tracing.Hooks{
+	cleanup, err = Install(ctx, New(&tracing.Hooks{
 		OnEnter: func(_ int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
 			calls++
 		},
 	}))
-	require.True(t, ok)
+	require.NoError(t, err)
 
 	manager.Hooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
 	require.Equal(t, 1, calls)
@@ -72,4 +72,25 @@ func TestWithDepthOffset(t *testing.T) {
 	require.Equal(t, 6, faultDepth)
 	require.Equal(t, 1, txEnds)
 	require.Nil(t, WithDepthOffset(nil, 1).Hooks())
+}
+
+func TestInstallRejectsMissingHooks(t *testing.T) {
+	manager := vmtracer.New(nil)
+	ctx := vmtracer.WithManager(sdk.Context{}.WithContext(context.Background()), manager)
+	for _, tracer := range []*Tracer{nil, New(nil)} {
+		cleanup, err := Install(ctx, tracer)
+		require.ErrorContains(t, err, "tracer hooks")
+		cleanup()
+		cleanup()
+		require.NoError(t, manager.ExecutionError())
+	}
+}
+
+func TestBeginRequiresExecutionJournal(t *testing.T) {
+	ctx := sdk.Context{}.WithContext(context.Background())
+	_, err := Begin(ctx)
+	require.ErrorContains(t, err, "execution manager")
+	ctx = vmtracer.WithManager(ctx, vmtracer.New(nil))
+	_, err = Begin(ctx)
+	require.ErrorContains(t, err, "execution journal")
 }

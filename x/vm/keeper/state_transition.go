@@ -10,6 +10,7 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
@@ -20,6 +21,7 @@ import (
 	evmtrace "github.com/cosmos/evm/trace"
 	"github.com/cosmos/evm/utils"
 	"github.com/cosmos/evm/x/vm/statedb"
+	vmtracer "github.com/cosmos/evm/x/vm/tracer"
 	"github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
@@ -46,6 +48,18 @@ func (k *Keeper) NewEVMWithOverridePrecompiles(
 	stateDB vm.StateDB,
 	overridePrecompiles bool,
 ) *vm.EVM {
+	evm, _ := k.newEVMWithOverridePrecompiles(ctx, msg, cfg, tracingHooks, stateDB, overridePrecompiles)
+	return evm
+}
+
+func (k *Keeper) newEVMWithOverridePrecompiles(
+	ctx sdk.Context,
+	msg core.Message,
+	cfg *statedb.EVMConfig,
+	tracingHooks *tracing.Hooks,
+	stateDB vm.StateDB,
+	overridePrecompiles bool,
+) (*vm.EVM, func()) {
 	ctx, span := ctx.StartSpan(tracer, "NewEVMWithOverridePrecompiles", trace.WithAttributes(
 		attribute.Bool("override_precompiles", overridePrecompiles),
 		attribute.String("from", msg.From.Hex()),
@@ -63,6 +77,13 @@ func (k *Keeper) NewEVMWithOverridePrecompiles(
 		Difficulty:  big.NewInt(0),                         // unused. Only required in PoW context
 		BaseFee:     cfg.BaseFee,
 		Random:      &common.MaxHash, // need to be different than nil to signal it is after the merge and pick up the right opcodes
+	}
+
+	if manager, ok := vmtracer.FromContext(ctx); ok {
+		blockCtx.Transfer = func(db vm.StateDB, from, to common.Address, amount *uint256.Int, rules *params.Rules) {
+			core.Transfer(db, from, to, amount, rules)
+			manager.RecordNativeTransfer(from, to, amount.ToBig())
+		}
 	}
 
 	ethCfg := types.GetEthChainConfig()
@@ -92,7 +113,22 @@ func (k *Keeper) NewEVMWithOverridePrecompiles(
 			k.GetPrecompileRecipientCallHook(ctx),
 		)
 	}
-	return vm.NewEVMWithHooks(evmHooks, blockCtx, txCtx, stateDB, ethCfg, vmConfig)
+	restoreCodeReader := func() {}
+	evm := vm.NewEVMWithHooks(evmHooks, blockCtx, txCtx, stateDB, ethCfg, vmConfig)
+	if manager, ok := vmtracer.FromContext(ctx); ok {
+		restoreCodeReader = manager.SetCodeReader(func(addr common.Address) []byte {
+			if !ethCfg.IsPrague(evm.Context.BlockNumber, evm.Context.Time) {
+				return nil
+			}
+			for _, precompile := range evm.ActivePrecompiles() {
+				if addr == precompile {
+					return nil
+				}
+			}
+			return stateDB.GetCode(addr)
+		})
+	}
+	return evm, restoreCodeReader
 }
 
 // NewEVM generates a go-ethereum VM from the provided Message fields and the chain parameters
@@ -396,7 +432,8 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 		return nil, 0, types.ErrNilStateDB
 	}
 	ethCfg := types.GetEthChainConfig()
-	evm := k.NewEVMWithOverridePrecompiles(ctx, msg, cfg, tracingHooks, stateDB, overrides == nil)
+	evm, restoreCodeReader := k.newEVMWithOverridePrecompiles(ctx, msg, cfg, tracingHooks, stateDB, overrides == nil)
+	defer restoreCodeReader()
 	// Gas limit suffices for the floor data cost (EIP-7623)
 	rules := ethCfg.Rules(evm.Context.BlockNumber, true, evm.Context.Time)
 	if overrides != nil {
@@ -415,7 +452,12 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 		if vmCfg.Tracer.OnTxStart != nil {
 			vmCfg.Tracer.OnTxStart(
 				evm.GetVMContext(),
-				ethtypes.NewTx(&ethtypes.LegacyTx{To: msg.To, Data: msg.Data, Value: msg.Value, Gas: msg.GasLimit}),
+				ethtypes.NewTx(&ethtypes.LegacyTx{
+					To:    msg.To,
+					Data:  msg.Data,
+					Value: msg.Value,
+					Gas:   msg.GasLimit,
+				}),
 				msg.From,
 			)
 		}
@@ -535,6 +577,12 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 	if isAmsterdam {
 		stateDB.EmitLogsForBurnAccounts()
 	}
+	if manager, ok := vmtracer.FromContext(ctx); ok {
+		if executionErr := manager.ExecutionError(); executionErr != nil {
+			return nil, 0, errorsmod.Wrap(executionErr, "EVM execution rejected")
+		}
+	}
+
 	// The dirty states in `StateDB` is either committed or discarded after return
 	if commit {
 		// In a precompile context, we never want to commit, as that will collapse the cache stack.

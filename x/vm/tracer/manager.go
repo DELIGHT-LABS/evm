@@ -1,6 +1,7 @@
 package tracer
 
 import (
+	"errors"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -23,7 +24,9 @@ type Manager struct {
 
 	// Each OnEnter pushes its VM-reported depth. The stack length determines
 	// the logical depth across both native reentry and nested VM instances.
-	frameDepths []int
+	frameDepths    []int
+	journal        Journal
+	observationErr error
 
 	nextID   uint64
 	globals  []installedHooks
@@ -82,13 +85,26 @@ func (m *Manager) install(tracer Tracer, session bool) func() {
 		return func() {}
 	}
 
+	if journal, ok := tracer.(Journal); ok {
+		if m.HasActiveFrame() || m.journal != nil || journal.LastOccurrence() != 0 {
+			m.LatchError(errors.New("execution journal must be installed once before execution"))
+			return func() {}
+		}
+		m.journal = journal
+		journal.LatchError(m.observationErr)
+		m.observationErr = nil
+	}
+
 	hooks := tracer.Hooks()
 	if hooks == nil {
 		return func() {}
 	}
 
 	m.nextID++
-	entry := installedHooks{id: m.nextID, hooks: *hooks}
+	entry := installedHooks{
+		id:    m.nextID,
+		hooks: *hooks,
+	}
 	if session {
 		m.sessions = append(m.sessions, entry)
 	} else {
@@ -103,6 +119,9 @@ func (m *Manager) install(tracer Tracer, session bool) func() {
 		}
 		closed = true
 		m.remove(entry.id, session)
+		if _, ok := tracer.(Journal); ok {
+			m.journal = nil
+		}
 	}
 }
 
@@ -423,4 +442,49 @@ func anyHook(hooks []tracing.Hooks, predicate func(tracing.Hooks) bool) bool {
 		}
 	}
 	return false
+}
+
+// Journal returns the global execution journal, or nil when none is installed.
+func (m *Manager) Journal() Journal {
+	if m == nil {
+		return nil
+	}
+	return m.journal
+}
+
+func (m *Manager) LatchError(err error) {
+	if m == nil {
+		return
+	}
+	if m.journal != nil {
+		m.journal.LatchError(err)
+	} else if m.observationErr == nil {
+		m.observationErr = err
+	}
+}
+
+func (m *Manager) ExecutionError() error {
+	if m == nil {
+		return nil
+	}
+	if m.observationErr != nil {
+		return m.observationErr
+	}
+	if m.journal != nil {
+		return m.journal.ExecutionError()
+	}
+	return nil
+}
+
+func (m *Manager) SetCodeReader(reader func(common.Address) []byte) func() {
+	if m.Journal() == nil {
+		return func() {}
+	}
+	return m.journal.SetCodeReader(reader)
+}
+
+func (m *Manager) RecordNativeTransfer(from, to common.Address, value *big.Int) {
+	if m.Journal() != nil {
+		m.journal.RecordNativeTransfer(from, to, value)
+	}
 }
