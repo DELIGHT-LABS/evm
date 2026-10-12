@@ -35,12 +35,12 @@ func TestPrepareTracingInstallsSessionTracerWithoutApplicationFactories(t *testi
 	require.True(t, ok)
 
 	calls := 0
-	cleanup, ok := vmsessiontracer.Install(actualCtx, vmsessiontracer.New(&tracing.Hooks{
+	cleanup, err := vmsessiontracer.Install(actualCtx, vmsessiontracer.New(&tracing.Hooks{
 		OnEnter: func(_ int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
 			calls++
 		},
 	}))
-	require.True(t, ok)
+	require.NoError(t, err)
 	t.Cleanup(cleanup)
 
 	hooks.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
@@ -91,8 +91,8 @@ func TestPrepareTracingWithBasePreservesDispatchOrder(t *testing.T) {
 		return ctx, &testExecutionTracer{hooks: newHooks("global")}
 	})
 	ctx, hooks := k.prepareTracingWithBase(ctx, core.Message{}, statedb.NewEmptyTxConfig(), false, newHooks("base"))
-	uninstall, ok := vmsessiontracer.Install(ctx, vmsessiontracer.New(newHooks("session")))
-	require.True(t, ok)
+	uninstall, err := vmsessiontracer.Install(ctx, vmsessiontracer.New(newHooks("session")))
+	require.NoError(t, err)
 	defer uninstall()
 	hooks.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
 	hooks.OnExit(0, nil, 0, nil, false)

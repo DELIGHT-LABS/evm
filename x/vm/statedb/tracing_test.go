@@ -3,10 +3,15 @@ package statedb_test
 import (
 	"testing"
 
+	"github.com/ethereum/go-ethereum/core/tracing"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/cosmos/evm/x/vm/statedb"
 	vmtracer "github.com/cosmos/evm/x/vm/tracer"
+	vmglobal "github.com/cosmos/evm/x/vm/tracer/global"
 
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdktestutil "github.com/cosmos/cosmos-sdk/testutil"
@@ -52,4 +57,41 @@ func TestAttachTracerManager(t *testing.T) {
 	require.Same(t, cacheStore, cacheCtx.MultiStore())
 	require.Same(t, cacheEvents, cacheCtx.EventManager())
 	require.Same(t, cacheGasMeter, cacheCtx.GasMeter())
+}
+
+func TestStateDBObservationsPreserveRevertedFacts(t *testing.T) {
+	ctx := newTestCtx()
+	db := statedb.New(ctx, NewMockKeeper(), emptyTxConfig)
+	manager := vmtracer.New(nil)
+	collector := vmglobal.NewCollector()
+	manager.InstallGlobal(collector)
+	manager.SetCodeReader(db.GetCode)
+	db.AttachTracerManager(manager)
+	manager.Hooks().OnEnter(0, byte(vm.CALL), address, address2, nil, 100, nil)
+	snapshot := db.Snapshot()
+	db.AddBalance(address, uint256.NewInt(10), tracing.BalanceChangeTransfer)
+	db.SubBalance(address, uint256.NewInt(3), tracing.BalanceChangeTransfer)
+	db.SetBalance(address, uint256.NewInt(2), tracing.BalanceChangeUnspecified)
+	log := &ethtypes.Log{
+		Address: address,
+		Data:    []byte{7},
+	}
+	db.AddLog(log)
+	db.RevertToSnapshot(snapshot)
+	manager.Hooks().OnExit(0, nil, 0, vm.ErrExecutionReverted, true)
+	require.True(t, db.GetBalance(address).IsZero())
+	require.Empty(t, db.Logs())
+	facts := collector.Observations()
+	require.Len(t, facts, 6)
+	require.Equal(t, vmtracer.BalanceChange, facts[1].Kind)
+	require.Equal(t, int64(0), facts[1].PreviousBalance.Int64())
+	require.Equal(t, int64(10), facts[1].CurrentBalance.Int64())
+	require.Equal(t, int64(7), facts[2].CurrentBalance.Int64())
+	require.Equal(t, int64(2), facts[3].CurrentBalance.Int64())
+	require.Equal(t, vmtracer.Log, facts[4].Kind)
+	require.Equal(t, uint64(1), facts[4].FrameID)
+	require.True(t, facts[4].Status.Reverted)
+	log.Data[0] = 99
+	require.Equal(t, byte(7), facts[4].Log.Data[0])
+	require.NoError(t, manager.ExecutionError())
 }

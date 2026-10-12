@@ -11,9 +11,10 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	gethvm "github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/eth/tracers"
-	_ "github.com/ethereum/go-ethereum/eth/tracers/native"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
+
+	_ "github.com/ethereum/go-ethereum/eth/tracers/native"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
@@ -45,11 +46,12 @@ func TestManagerDispatchesScopesAndUninstalls(t *testing.T) {
 			calls = append(calls, "global")
 		},
 	}))
-	uninstallSession := manager.InstallSession(newTestTracer(&tracing.Hooks{
+	uninstallSession, err := manager.InstallSession(newTestTracer(&tracing.Hooks{
 		OnEnter: func(_ int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
 			calls = append(calls, "session")
 		},
 	}))
+	require.NoError(t, err)
 
 	require.Same(t, dispatcher, manager.Hooks())
 	dispatcher.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
@@ -76,11 +78,12 @@ func TestManagerUpdatesOnlySubscribedCallbacks(t *testing.T) {
 	require.Nil(t, dispatcher.OnOpcode)
 
 	opcodes := 0
-	uninstall := manager.InstallSession(newTestTracer(&tracing.Hooks{
+	uninstall, err := manager.InstallSession(newTestTracer(&tracing.Hooks{
 		OnOpcode: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
 			opcodes++
 		},
 	}))
+	require.NoError(t, err)
 	require.Same(t, dispatcher, manager.Hooks())
 	require.NotNil(t, dispatcher.OnOpcode)
 	dispatcher.OnOpcode(0, 0, 0, 0, nil, nil, 0, nil)
@@ -111,11 +114,12 @@ func TestManagerNestedHooksOmitTransactionBoundary(t *testing.T) {
 	require.Nil(t, nested.OnTxEnd)
 	require.NotNil(t, nested.OnEnter)
 
-	manager.InstallSession(newTestTracer(&tracing.Hooks{
+	_, err := manager.InstallSession(newTestTracer(&tracing.Hooks{
 		OnEnter: func(_ int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
 			enters++
 		},
 	}))
+	require.NoError(t, err)
 	require.Same(t, nested, manager.NestedHooks())
 	require.NotNil(t, nested.OnEnter)
 
@@ -195,11 +199,12 @@ func TestManagerRestoresDepthAfterReentrantFrame(t *testing.T) {
 			// A precompile reenters its VM at the same reported depth. Installing
 			// and removing a session rebuilds the dispatcher while this frame is open.
 			dispatcher.OnEnter(rawDepth, 0, common.Address{}, common.Address{}, nil, 0, nil)
-			uninstall := manager.InstallSession(newTestTracer(&tracing.Hooks{
+			uninstall, err := manager.InstallSession(newTestTracer(&tracing.Hooks{
 				OnOpcode: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ []byte, depth int, _ error) {
 					sessionOpcodes = append(sessionOpcodes, depth)
 				},
 			}))
+			require.NoError(t, err)
 			dispatcher.OnOpcode(0, 0, 0, 0, nil, nil, rawDepth+1, nil)
 			dispatcher.OnFault(0, 0, 0, 0, nil, rawDepth+1, gethvm.ErrInvalidJump)
 			uninstall()
@@ -316,17 +321,19 @@ func TestManagerUsesDispatchSnapshot(t *testing.T) {
 	var calls []string
 	var uninstallSecond func()
 
-	manager.InstallSession(newTestTracer(&tracing.Hooks{
+	_, err := manager.InstallSession(newTestTracer(&tracing.Hooks{
 		OnExit: func(_ int, _ []byte, _ uint64, _ error, _ bool) {
 			calls = append(calls, "first")
 			uninstallSecond()
 		},
 	}))
-	uninstallSecond = manager.InstallSession(newTestTracer(&tracing.Hooks{
+	require.NoError(t, err)
+	uninstallSecond, err = manager.InstallSession(newTestTracer(&tracing.Hooks{
 		OnExit: func(_ int, _ []byte, _ uint64, _ error, _ bool) {
 			calls = append(calls, "second")
 		},
 	}))
+	require.NoError(t, err)
 
 	manager.Hooks().OnExit(0, nil, 0, nil, false)
 	require.Equal(t, []string{"first", "second"}, calls)

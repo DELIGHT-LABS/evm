@@ -13,8 +13,10 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	gethvm "github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/eth/tracers"
-	_ "github.com/ethereum/go-ethereum/eth/tracers/native"
 	"github.com/holiman/uint256"
+
+	// Register geth's built-in tracers for trace and replay integration tests.
+	_ "github.com/ethereum/go-ethereum/eth/tracers/native"
 
 	precompilecommon "github.com/cosmos/evm/precompiles/common"
 	testconstants "github.com/cosmos/evm/testutil/constants"
@@ -51,19 +53,19 @@ func (p *sessionTracerPrecompile) Run(evm *gethvm.EVM, contract *gethvm.Contract
 	return p.RunNativeAction(evm, contract, func(ctx sdk.Context) ([]byte, error) {
 		p.manager, _ = vmtracer.FromContext(ctx)
 		p.managers = append(p.managers, p.manager)
-		uninstall, ok := vmsessiontracer.Install(ctx, vmsessiontracer.New(&tracing.Hooks{
+		uninstall, err := vmsessiontracer.Install(ctx, vmsessiontracer.New(&tracing.Hooks{
 			OnEnter: func(depth int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
 				p.enterCalls++
 				p.enterDepths = append(p.enterDepths, depth)
 			},
 		}))
-		p.installed = ok
-		if !ok {
-			return nil, fmt.Errorf("session tracer manager is unavailable")
+		p.installed = err == nil
+		if err != nil {
+			return nil, fmt.Errorf("install session tracer: %w", err)
 		}
 		defer uninstall()
 
-		_, _, err := evm.Call(contract.Address(), p.target, nil, contract.Gas, uint256.NewInt(0))
+		_, _, err = evm.Call(contract.Address(), p.target, nil, contract.Gas, uint256.NewInt(0))
 		p.activeAfterDirectCall = p.manager.HasActiveFrame()
 		if err == nil && p.keeper != nil {
 			stateDB, ok := evm.StateDB.(*statedb.StateDB)
@@ -122,7 +124,12 @@ func (s *KeeperTestSuite) TestQueryPathsProvideSessionTracerManager() {
 				zeroGasPrice := hexutil.Big(*big.NewInt(0))
 				// Nonempty input avoids EstimateGas's plain-transfer shortcut.
 				input := hexutil.Bytes{1}
-				args, err := json.Marshal(evmtypes.TransactionArgs{From: &sender, To: &address, GasPrice: &zeroGasPrice, Input: &input})
+				args, err := json.Marshal(evmtypes.TransactionArgs{
+					From:     &sender,
+					To:       &address,
+					GasPrice: &zeroGasPrice,
+					Input:    &input,
+				})
 				s.Require().NoError(err)
 				newTx := func(nonce uint64) *evmtypes.MsgEthereumTx {
 					tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), evmtypes.EvmTxArgs{
@@ -327,7 +334,10 @@ func (s *KeeperTestSuite) TestSameVMReentryPreservesSessionTracerForKeeperCalls(
 	s.Require().NoError(json.Unmarshal(result, &root))
 	s.Require().Equal(callFrame{To: outerAddress, Calls: []callFrame{
 		{To: target},
-		{To: innerAddress, Calls: []callFrame{{To: target}, {To: target}}},
+		{
+			To:    innerAddress,
+			Calls: []callFrame{{To: target}, {To: target}},
+		},
 	}}, root)
 }
 
@@ -519,9 +529,9 @@ func (s *KeeperTestSuite) TestCallEVMViewWithDataStartsIndependentTracingLifecyc
 	s.Require().Len(managers, 2)
 	s.Require().NotSame(managers[0], managers[1])
 	s.Require().Len(collectors, 2)
-	s.Require().Len(collectors[0].Touches(), 1)
-	s.Require().Equal(recipient, collectors[0].Touches()[0].To)
-	s.Require().NotEmpty(collectors[1].Touches())
+	s.Require().Len(collectors[0].Observations(), 2)
+	s.Require().Equal(recipient, collectors[0].Observations()[0].Target)
+	s.Require().NotEmpty(collectors[1].Observations())
 }
 
 func (s *KeeperTestSuite) TestNestedCallEVMWithDataReusesTransactionTracing() {
@@ -602,4 +612,185 @@ func (s *KeeperTestSuite) TestNestedCallEVMWithDataReusesTransactionTracing() {
 	s.Require().Same(outerPrecompile.manager, sessionPrecompile.manager)
 	s.Require().True(sessionPrecompile.installed)
 	s.Require().Equal(1, sessionPrecompile.enterCalls)
+}
+
+// Exercise the production keeper boundary with real StateDB movements rather
+// than treating OnEnter(value) as proof of a transfer.
+func (s *KeeperTestSuite) TestCollectorActualMovementAndObservationRejection() {
+	for _, reject := range []bool{false, true} {
+		s.Run(fmt.Sprintf("reject=%v", reject), func() {
+			s.SetupTest()
+			ctx := s.Network.GetContext()
+			keeper := s.Network.App.GetEVMKeeper()
+			var collector vmglobaltracer.Collector
+			rejection := errors.New("observation policy rejected")
+			keeper.SetGlobalTracerFactories(func(factoryCtx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+				collector = vmglobaltracer.NewCollector()
+				if reject {
+					_, err := collector.Observe(func(e vmtracer.Observation) error {
+						if e.Kind == vmtracer.NativeTransfer {
+							return rejection
+						}
+						return nil
+					})
+					s.Require().NoError(err)
+				}
+				return factoryCtx, collector
+			})
+			sender, recipient := s.Keyring.GetAddr(0), s.Keyring.GetAddr(1)
+			before := keeper.GetBalance(ctx, recipient)
+			tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), evmtypes.EvmTxArgs{
+				To:       &recipient,
+				Amount:   big.NewInt(7),
+				GasLimit: 100_000,
+				GasPrice: big.NewInt(0),
+			})
+			s.Require().NoError(err)
+			response, err := keeper.ApplyTransaction(ctx.WithGasMeter(storetypes.NewGasMeter(1_000_000)), tx.GetMsgs()[0].(*evmtypes.MsgEthereumTx).AsTransaction())
+			s.Require().NotNil(collector)
+			facts := collector.Observations()
+			s.Require().NotEmpty(facts)
+			transfers := nativeObservations(collector.Observations())
+			s.Require().Len(transfers, 1)
+			s.Require().Equal(sender, transfers[0].From)
+			s.Require().Equal(recipient, transfers[0].To)
+			s.Require().Equal(int64(7), transfers[0].Amount.Int64())
+			balances := 0
+			for _, e := range facts {
+				if e.Kind == vmtracer.BalanceChange {
+					balances++
+				}
+			}
+			s.Require().Equal(2, balances)
+			if reject {
+				s.Require().ErrorIs(err, rejection)
+				s.Require().Equal(before, keeper.GetBalance(ctx, recipient))
+			} else {
+				s.Require().NoError(err)
+				s.Require().False(response.Failed())
+				s.Require().NoError(collector.Error())
+				s.Require().True(transfers[0].Status.Success)
+			}
+		})
+	}
+}
+
+func (s *KeeperTestSuite) TestCollectorRetainsChildMovementAfterParentRevert() {
+	s.SetupTest()
+	ctx := s.Network.GetContext()
+	keeper := s.Network.App.GetEVMKeeper()
+	sender, recipient := s.Keyring.GetAddr(0), s.Keyring.GetAddr(1)
+	parent := common.HexToAddress("0x000000000000000000000000000000000000eeee")
+	// CALL recipient with value 7, consume its success flag, then REVERT.
+	code := common.FromHex("0x6000600060006000600773")
+	code = append(code, recipient.Bytes()...)
+	code = append(code, common.FromHex("0x61fffff15060006000fd")...)
+	db := statedb.New(ctx, keeper, statedb.NewEmptyTxConfig())
+	db.SetCode(parent, code, tracing.CodeChangeUnspecified)
+	s.Require().NoError(db.Commit())
+	var collector vmglobaltracer.Collector
+	keeper.SetGlobalTracerFactories(func(factoryCtx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+		collector = vmglobaltracer.NewCollector()
+		return factoryCtx, collector
+	})
+	before := keeper.GetBalance(ctx, recipient)
+	tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), evmtypes.EvmTxArgs{
+		To:       &parent,
+		Amount:   big.NewInt(9),
+		GasLimit: 200_000,
+		GasPrice: big.NewInt(0),
+	})
+	s.Require().NoError(err)
+	response, err := keeper.ApplyTransaction(ctx.WithGasMeter(storetypes.NewGasMeter(1_000_000)), tx.GetMsgs()[0].(*evmtypes.MsgEthereumTx).AsTransaction())
+	s.Require().NoError(err)
+	s.Require().True(response.Failed())
+	s.Require().NoError(collector.Error())
+	transfers := nativeObservations(collector.Observations())
+	s.Require().Len(transfers, 2)
+	s.Require().Equal(sender, transfers[0].From)
+	s.Require().Equal(parent, transfers[0].To)
+	s.Require().Equal(parent, transfers[1].From)
+	s.Require().Equal(recipient, transfers[1].To)
+	s.Require().Equal(int64(7), transfers[1].Amount.Int64())
+	s.Require().NotEqual(transfers[0].OccurrenceID, transfers[1].OccurrenceID)
+	for _, transfer := range transfers {
+		s.Require().True(transfer.Status.Reverted)
+		s.Require().False(transfer.Status.Success)
+	}
+	childSucceeded := false
+	for _, e := range collector.Observations() {
+		if e.Kind == vmtracer.CallExit && e.FrameID == transfers[1].FrameID {
+			s.Require().NoError(e.Err)
+			s.Require().False(e.Reverted)
+			s.Require().True(e.Status.Reverted)
+			childSucceeded = true
+		}
+	}
+	s.Require().True(childSucceeded)
+	s.Require().Equal(before, keeper.GetBalance(ctx, recipient))
+}
+
+func (s *KeeperTestSuite) TestCollectorTokenRequestAndRawLog() {
+	s.SetupTest()
+	sender := s.Keyring.GetKey(0)
+	recipient := s.Keyring.GetAddr(1)
+	token, err := deployErc20Contract(sender, s.Factory)
+	s.Require().NoError(err)
+	s.Require().NoError(s.Network.NextBlock())
+	var collector vmglobaltracer.Collector
+	s.Network.App.GetEVMKeeper().SetGlobalTracerFactories(func(ctx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+		collector = vmglobaltracer.NewCollector()
+		return ctx, collector
+	})
+	_, err = executeTransferCall(transferParams{
+		senderKey:     sender,
+		contractAddr:  token,
+		recipientAddr: recipient,
+	}, s.Factory)
+	s.Require().NoError(err)
+	s.Require().NoError(collector.Error())
+	var enter, request, emission *vmtracer.Observation
+	for _, e := range collector.Observations() {
+		switch e.Kind {
+		case vmtracer.CallEnter:
+			if e.Target == token {
+				observation := e
+				enter = &observation
+			}
+		case vmtracer.ERC20Call:
+			observation := e
+			request = &observation
+		case vmtracer.Log:
+			if len(e.Log.Topics) == 3 && e.Log.Address == token {
+				observation := e
+				emission = &observation
+			}
+		case vmtracer.NativeTransfer:
+			s.FailNow("token log must not become a native transfer")
+		}
+	}
+	s.Require().NotNil(enter)
+	s.Require().NotNil(request)
+	s.Require().NotNil(emission)
+	s.Require().Equal(enter.FrameID, request.FrameID)
+	s.Require().Equal(enter.FrameID, emission.FrameID)
+	s.Require().Equal(enter.Input, request.Input)
+	s.Require().Equal(sender.Addr, request.Caller)
+	s.Require().Equal(token, request.Target)
+	s.Require().Less(enter.OccurrenceID, request.OccurrenceID)
+	s.Require().Less(request.OccurrenceID, emission.OccurrenceID)
+	s.Require().Equal(common.BytesToHash(sender.Addr.Bytes()), emission.Log.Topics[1])
+	s.Require().Equal(common.BytesToHash(recipient.Bytes()), emission.Log.Topics[2])
+	s.Require().Equal(int64(1000), new(big.Int).SetBytes(emission.Log.Data).Int64())
+	s.Require().True(emission.Status.Success)
+}
+
+func nativeObservations(events []vmtracer.Observation) []vmtracer.Observation {
+	var out []vmtracer.Observation
+	for _, e := range events {
+		if e.Kind == vmtracer.NativeTransfer {
+			out = append(out, e)
+		}
+	}
+	return out
 }
