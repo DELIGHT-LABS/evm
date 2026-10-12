@@ -794,3 +794,86 @@ func nativeObservations(events []vmtracer.Observation) []vmtracer.Observation {
 	}
 	return out
 }
+
+func (s *KeeperTestSuite) TestCollectorEnforcementCoverageAndFinalization() {
+	for _, mode := range []string{"budget", "observer", "passive", "txend-reject", "txend-accept"} {
+		s.Run(mode, func() {
+			s.SetupTest()
+			ctx := s.Network.GetContext()
+			keeper := s.Network.App.GetEVMKeeper()
+			recipient := common.HexToAddress("0x000000000000000000000000000000000000eeef")
+			// Write 1 to storage slot 0, then STOP.
+			db := statedb.New(ctx, keeper, statedb.NewEmptyTxConfig())
+			db.SetCode(recipient, common.FromHex("0x600160005500"), tracing.CodeChangeUnspecified)
+			s.Require().NoError(db.Commit())
+			before := keeper.GetBalance(ctx, recipient)
+			rejection := errors.New("final observation policy rejected")
+			var collector vmglobaltracer.Collector
+			var manager *vmtracer.Manager
+			observed, ended := false, 0
+			keeper.SetGlobalTracerFactories(func(factoryCtx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+				manager, _ = vmtracer.FromContext(factoryCtx)
+				s.Require().NotNil(manager)
+				budget := uint64(100)
+				if mode == "budget" || mode == "passive" {
+					budget = 3
+				}
+				var err error
+				collector, err = vmglobaltracer.NewCollectorWithBudget(budget)
+				s.Require().NoError(err)
+				if mode == "budget" || mode == "observer" {
+					_, err = collector.Observe(func(e vmtracer.Observation) error {
+						if e.Kind == vmtracer.NativeTransfer {
+							observed = true
+							return rejection
+						}
+						return nil
+					})
+					s.Require().NoError(err)
+				}
+				manager.InstallGlobal(vmsessiontracer.New(&tracing.Hooks{
+					OnTxEnd: func(receipt *ethtypes.Receipt, _ error) {
+						ended++
+						s.Require().Positive(receipt.GasUsed)
+						// No economic or storage effects may be committed yet.
+						s.Require().Equal(before, keeper.GetBalance(ctx, recipient))
+						s.Require().Equal(common.Hash{}, statedb.New(ctx, keeper, statedb.NewEmptyTxConfig()).GetState(recipient, common.Hash{}))
+						if mode == "txend-reject" {
+							manager.LatchError(rejection)
+						}
+					},
+				}))
+				return factoryCtx, collector
+			})
+			tx, err := s.Factory.GenerateSignedEthTx(s.Keyring.GetPrivKey(0), evmtypes.EvmTxArgs{
+				To:       &recipient,
+				Amount:   big.NewInt(7),
+				GasLimit: 100_000,
+				GasPrice: big.NewInt(0),
+			})
+			s.Require().NoError(err)
+			response, err := keeper.ApplyTransaction(ctx.WithGasMeter(storetypes.NewGasMeter(1_000_000)), tx.GetMsgs()[0].(*evmtypes.MsgEthereumTx).AsTransaction())
+			s.Require().Equal(1, ended)
+			if mode == "budget" {
+				s.Require().ErrorContains(err, "budget")
+				s.Require().False(observed)
+			} else if mode == "observer" || mode == "txend-reject" {
+				s.Require().ErrorIs(err, rejection)
+			} else {
+				s.Require().NoError(err)
+				s.Require().False(response.Failed())
+			}
+			after := statedb.New(ctx, keeper, statedb.NewEmptyTxConfig())
+			if mode == "passive" || mode == "txend-accept" {
+				s.Require().Equal(new(uint256.Int).Add(before, uint256.NewInt(7)), keeper.GetBalance(ctx, recipient))
+				s.Require().Equal(common.BigToHash(big.NewInt(1)), after.GetState(recipient, common.Hash{}))
+			} else {
+				s.Require().Equal(before, keeper.GetBalance(ctx, recipient))
+				s.Require().Equal(common.Hash{}, after.GetState(recipient, common.Hash{}))
+			}
+			if mode == "observer" {
+				s.Require().True(observed)
+			}
+		})
+	}
+}

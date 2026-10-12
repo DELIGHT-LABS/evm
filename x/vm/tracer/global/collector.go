@@ -112,8 +112,9 @@ func (c *txTraceCollector) LatchError(err error) {
 	}
 }
 
-// ExecutionError reports explicitly latched enforcement errors. Collection
-// incompleteness is returned by Error and does not change ordinary VM execution.
+// ExecutionError reports enforcement errors, including incomplete observation
+// coverage while a policy observer is installed. Passive tracing errors alone
+// do not change ordinary VM execution.
 func (c *txTraceCollector) ExecutionError() error {
 	if c == nil {
 		return nil
@@ -123,8 +124,14 @@ func (c *txTraceCollector) ExecutionError() error {
 }
 
 func (c *txTraceCollector) collectionError(err error) {
-	if c != nil && c.err == nil {
+	if c == nil || err == nil {
+		return
+	}
+	if c.err == nil {
 		c.err = err
+	}
+	if len(c.subscribers) > 0 {
+		c.LatchError(c.err)
 	}
 }
 
@@ -192,6 +199,11 @@ func (c *txTraceCollector) CurrentFrame() (vmtracer.Observation, bool) {
 func (c *txTraceCollector) Observe(fn vmtracer.Observer) (func(), error) {
 	if c == nil || fn == nil {
 		return nil, errors.New("observations not enabled or nil observer")
+	}
+
+	if c.err != nil {
+		c.LatchError(c.err)
+		return nil, c.err
 	}
 
 	c.nextSubscriber++

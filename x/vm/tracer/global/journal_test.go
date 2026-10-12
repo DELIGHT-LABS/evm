@@ -227,3 +227,32 @@ func TestSessionBeginRequiresActiveFrame(t *testing.T) {
 	_, err = vmsession.Begin(ctx)
 	require.ErrorContains(t, err, "active execution frame")
 }
+
+func TestObserverCoverageFailureRejectsExecution(t *testing.T) {
+	m, collector := rawManager(t, 1)
+	stop, err := collector.Observe(func(vmtracer.Observation) error { return nil })
+	require.NoError(t, err)
+	m.Hooks().OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, nil, 100, nil)
+	m.RecordNativeTransfer(common.Address{}, common.Address{}, big.NewInt(7))
+	require.ErrorContains(t, m.ExecutionError(), "budget")
+	stop()
+	m.Hooks().OnExit(0, nil, 0, nil, false)
+	require.ErrorContains(t, m.ExecutionError(), "budget")
+	require.Len(t, collector.Observations(), 1)
+}
+
+func TestObserveRejectsIncompleteJournal(t *testing.T) {
+	m, collector := rawManager(t, 1)
+	m.Hooks().OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, nil, 100, nil)
+	m.RecordNativeTransfer(common.Address{}, common.Address{}, big.NewInt(7))
+	require.NoError(t, m.ExecutionError())
+	called := false
+	stop, err := collector.Observe(func(vmtracer.Observation) error {
+		called = true
+		return nil
+	})
+	require.Nil(t, stop)
+	require.ErrorContains(t, err, "budget")
+	require.ErrorContains(t, m.ExecutionError(), "budget")
+	require.False(t, called)
+}

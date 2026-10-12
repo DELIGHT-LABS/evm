@@ -461,12 +461,20 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 				msg.From,
 			)
 		}
-		defer func() {
-			if vmCfg.Tracer.OnTxEnd != nil {
-				vmCfg.Tracer.OnTxEnd(&ethtypes.Receipt{GasUsed: msg.GasLimit - leftoverGas}, vmErr)
-			}
-		}()
 	}
+	// Finalize once before committing on normal completion. The deferred fallback
+	// preserves transaction-end callbacks on early errors.
+	txEnded := false
+	finishTx := func() {
+		if txEnded {
+			return
+		}
+		txEnded = true
+		if vmCfg.Tracer != nil && vmCfg.Tracer.OnTxEnd != nil {
+			vmCfg.Tracer.OnTxEnd(&ethtypes.Receipt{GasUsed: msg.GasLimit - leftoverGas}, vmErr)
+		}
+	}
+	defer finishTx()
 
 	sender := vm.AccountRef(msg.From)
 	contractCreation := msg.To == nil
@@ -577,6 +585,22 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 	if isAmsterdam {
 		stateDB.EmitLogsForBurnAccounts()
 	}
+	// calculate a minimum amount of gas to be charged to sender if GasLimit
+	// is considerably higher than GasUsed to stay more aligned with CometBFT gas mechanics
+	// for more info https://github.com/evmos/ethermint/issues/1085
+	minGasMultiplier := cfg.FeeMarketParams.MinGasMultiplier
+	if internal {
+		minGasMultiplier = math.LegacyZeroDec()
+	}
+	gasUsed, err := calculateChargedGas(msg.GasLimit, temporaryGasUsed, 0, minGasMultiplier)
+	if err != nil {
+		return nil, 0, err
+	}
+	// reset leftoverGas, to be used by the tracingHooks
+	leftoverGas = msg.GasLimit - gasUsed
+
+	finishTx()
+
 	if manager, ok := vmtracer.FromContext(ctx); ok {
 		if executionErr := manager.ExecutionError(); executionErr != nil {
 			return nil, 0, errorsmod.Wrap(executionErr, "EVM execution rejected")
@@ -597,19 +621,6 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 			}
 		}
 	}
-	// calculate a minimum amount of gas to be charged to sender if GasLimit
-	// is considerably higher than GasUsed to stay more aligned with CometBFT gas mechanics
-	// for more info https://github.com/evmos/ethermint/issues/1085
-	minGasMultiplier := cfg.FeeMarketParams.MinGasMultiplier
-	if internal {
-		minGasMultiplier = math.LegacyZeroDec()
-	}
-	gasUsed, err := calculateChargedGas(msg.GasLimit, temporaryGasUsed, 0, minGasMultiplier)
-	if err != nil {
-		return nil, 0, err
-	}
-	// reset leftoverGas, to be used by the tracingHooks
-	leftoverGas = msg.GasLimit - gasUsed
 
 	// if the execution reverted, we return the revert reason as the return data
 	if vmError == vm.ErrExecutionReverted.Error() {
