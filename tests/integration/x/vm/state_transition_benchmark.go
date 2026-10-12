@@ -238,7 +238,10 @@ func BenchmarkApplyTransactionWithLegacyTx(b *testing.B) { //nolint:dupl
 }
 
 func BenchmarkApplyTransactionWithDynamicFeeTx(b *testing.B) {
-	suite := KeeperTestSuite{EnableFeemarket: true, EnableLondonHF: true}
+	suite := KeeperTestSuite{
+		EnableFeemarket: true,
+		EnableLondonHF:  true,
+	}
 	suite.SetupTest()
 
 	ethSigner := ethtypes.LatestSignerForChainID(evmtypes.GetEthChainConfig().ChainID)
@@ -269,7 +272,10 @@ func BenchmarkApplyTransactionWithDynamicFeeTx(b *testing.B) {
 // BenchmarkApplyMessage includes manager, collector, and StateDB initialization
 // in each measured execution. Low-level ApplyMessage does not install tracers.
 func BenchmarkApplyMessage(b *testing.B, create network.CreateEvmApp) {
-	suite := KeeperTestSuite{Create: create, EnableLondonHF: true}
+	suite := KeeperTestSuite{
+		Create:         create,
+		EnableLondonHF: true,
+	}
 	suite.setupTest(b)
 
 	ethCfg := evmtypes.GetEthChainConfig()
@@ -297,7 +303,11 @@ func BenchmarkApplyMessage(b *testing.B, create network.CreateEvmApp) {
 		manager := vmtracer.New(nil)
 		ctx := vmtracer.WithManager(suite.Network.GetContext(), manager)
 		txConfig := statedb.NewEmptyTxConfig()
-		ctx, collector := vmglobaltracer.TxTraceFactory(ctx, vmtracer.ExecutionInfo{Message: *m, TxIndex: uint64(txConfig.TxIndex), Commit: true})
+		ctx, collector := vmglobaltracer.TxTraceFactory(ctx, vmtracer.ExecutionInfo{
+			Message: *m,
+			TxIndex: uint64(txConfig.TxIndex),
+			Commit:  true,
+		})
 		manager.InstallGlobal(collector)
 		stateDB := statedb.New(ctx, suite.Network.App.GetEVMKeeper(), txConfig)
 		resp, err := suite.Network.App.GetEVMKeeper().ApplyMessage(ctx, stateDB, *m, manager.Hooks(), true, false, false)
@@ -306,13 +316,17 @@ func BenchmarkApplyMessage(b *testing.B, create network.CreateEvmApp) {
 		require.NoError(b, err)
 		require.False(b, resp.Failed())
 		require.False(b, manager.HasActiveFrame())
-		touches, _, _ := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
-		require.NotEmpty(b, touches)
+		trace, traceErr := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
+		require.NoError(b, traceErr)
+		require.NotEmpty(b, trace)
 	}
 }
 
 func BenchmarkApplyMessageWithLegacyTx(b *testing.B, create network.CreateEvmApp) {
-	suite := KeeperTestSuite{Create: create, EnableLondonHF: true}
+	suite := KeeperTestSuite{
+		Create:         create,
+		EnableLondonHF: true,
+	}
 	suite.setupTest(b)
 
 	ethCfg := evmtypes.GetEthChainConfig()
@@ -340,7 +354,11 @@ func BenchmarkApplyMessageWithLegacyTx(b *testing.B, create network.CreateEvmApp
 		manager := vmtracer.New(nil)
 		ctx := vmtracer.WithManager(suite.Network.GetContext(), manager)
 		txConfig := statedb.NewEmptyTxConfig()
-		ctx, collector := vmglobaltracer.TxTraceFactory(ctx, vmtracer.ExecutionInfo{Message: *m, TxIndex: uint64(txConfig.TxIndex), Commit: true})
+		ctx, collector := vmglobaltracer.TxTraceFactory(ctx, vmtracer.ExecutionInfo{
+			Message: *m,
+			TxIndex: uint64(txConfig.TxIndex),
+			Commit:  true,
+		})
 		manager.InstallGlobal(collector)
 		stateDB := statedb.New(ctx, suite.Network.App.GetEVMKeeper(), txConfig)
 		resp, err := suite.Network.App.GetEVMKeeper().ApplyMessage(ctx, stateDB, *m, manager.Hooks(), true, false, false)
@@ -349,13 +367,18 @@ func BenchmarkApplyMessageWithLegacyTx(b *testing.B, create network.CreateEvmApp
 		require.NoError(b, err)
 		require.False(b, resp.Failed())
 		require.False(b, manager.HasActiveFrame())
-		touches, _, _ := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
-		require.NotEmpty(b, touches)
+		trace, traceErr := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
+		require.NoError(b, traceErr)
+		require.NotEmpty(b, trace)
 	}
 }
 
 func BenchmarkApplyMessageWithDynamicFeeTx(b *testing.B, create network.CreateEvmApp) {
-	suite := KeeperTestSuite{Create: create, EnableFeemarket: true, EnableLondonHF: true}
+	suite := KeeperTestSuite{
+		Create:          create,
+		EnableFeemarket: true,
+		EnableLondonHF:  true,
+	}
 	suite.setupTest(b)
 
 	ethCfg := evmtypes.GetEthChainConfig()
@@ -383,7 +406,11 @@ func BenchmarkApplyMessageWithDynamicFeeTx(b *testing.B, create network.CreateEv
 		manager := vmtracer.New(nil)
 		ctx := vmtracer.WithManager(suite.Network.GetContext(), manager)
 		txConfig := statedb.NewEmptyTxConfig()
-		ctx, collector := vmglobaltracer.TxTraceFactory(ctx, vmtracer.ExecutionInfo{Message: *m, TxIndex: uint64(txConfig.TxIndex), Commit: true})
+		ctx, collector := vmglobaltracer.TxTraceFactory(ctx, vmtracer.ExecutionInfo{
+			Message: *m,
+			TxIndex: uint64(txConfig.TxIndex),
+			Commit:  true,
+		})
 		manager.InstallGlobal(collector)
 		stateDB := statedb.New(ctx, suite.Network.App.GetEVMKeeper(), txConfig)
 		resp, err := suite.Network.App.GetEVMKeeper().ApplyMessage(ctx, stateDB, *m, manager.Hooks(), true, false, false)
@@ -392,7 +419,8 @@ func BenchmarkApplyMessageWithDynamicFeeTx(b *testing.B, create network.CreateEv
 		require.NoError(b, err)
 		require.False(b, resp.Failed())
 		require.False(b, manager.HasActiveFrame())
-		touches, _, _ := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
-		require.NotEmpty(b, touches)
+		trace, traceErr := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
+		require.NoError(b, traceErr)
+		require.NotEmpty(b, trace)
 	}
 }

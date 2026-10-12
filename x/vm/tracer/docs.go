@@ -93,50 +93,21 @@
 // NewEVM callers also own transaction-boundary hook dispatch; constructing the
 // VM alone does not emit OnTxStart or OnTxEnd.
 //
-// # Reading and customizing global traces
+// # Reading global traces
 //
-// A post-tx hook running with the execution context can then read its trace:
+// A post-tx hook reads the ordered trace and checks collection errors:
 //
-//	touches, transfers, erc20Transfers := vmglobaltracer.GetTxTrace(
-//		ctx,
-//		uint64(receipt.TransactionIndex),
-//	)
+//	observations, err := vmglobaltracer.GetTxTrace(ctx, uint64(receipt.TransactionIndex))
 //
-// Applications can replace the built-in collection policy while retaining the
-// standard GetTxTrace result API by implementing global.Collector. A custom
-// collector provides Hooks, Touches, Transfers, and ERC20Transfers; it can
-// decide which calls to retain, how to handle reverted frames, and which value
-// movements qualify as native or ERC20 transfers.
+// Call enter/exit, native transfers, token-call requests and raw logs share one
+// occurrence sequence. Reverted attempts remain present. ERC20 request records
+// have separate IDs, as required by the consumer's raw observation contract;
+// calldata and logs are not decoded into token movements by the collector.
+// Balance-change records are additional diagnostics, not guessed transfers.
 //
-// The custom collector and its constructor belong to the embedding application:
-//
-//	import (
-//		"github.com/cosmos/cosmos-sdk/types"
-//
-//		vmtracer "github.com/cosmos/evm/x/vm/tracer"
-//		vmglobaltracer "github.com/cosmos/evm/x/vm/tracer/global"
-//	)
-//
-//	func policyTraceFactory(
-//		ctx types.Context,
-//		execution vmtracer.ExecutionInfo,
-//	) (types.Context, vmtracer.Tracer) {
-//		// newPolicyCollector is implemented by the embedding application and
-//		// returns a value satisfying vmglobaltracer.Collector.
-//		collector := newPolicyCollector()
-//		ctx = vmglobaltracer.WithCollector(
-//			ctx,
-//			execution.TxIndex,
-//			collector,
-//		)
-//		return ctx, collector
-//	}
-//
-//	evmKeeper.SetGlobalTracerFactories(policyTraceFactory)
-//
-// Collectors with application-specific result types do not need to implement
-// global.Collector. They can return any vmtracer.Tracer from a GlobalFactory and
-// store their typed result in an application-owned context value instead.
+// Custom collectors implement tracer.Journal. Collection errors report missing
+// facts; explicit enforcement errors must be checked before committing. Keeper
+// handles that check on managed execution paths. Low-level VM callers own it.
 //
 // Session tracers are installed dynamically through the session package.
 // sessionHooks below is owned by the embedding application. Callers must retain
@@ -144,13 +115,14 @@
 //
 //	import vmsessiontracer "github.com/cosmos/evm/x/vm/tracer/session"
 //
-//	uninstall, ok := vmsessiontracer.Install(
+//	uninstall, err := vmsessiontracer.Install(
 //		ctx,
 //		vmsessiontracer.New(sessionHooks),
 //	)
-//	if ok {
-//		defer uninstall()
+//	if err != nil {
+//		return err
 //	}
+//	defer uninstall()
 //
 // The manager reports logical call depths across precompile reentry and nested
 // EVM instances. Applications do not need to add an offset for these calls.

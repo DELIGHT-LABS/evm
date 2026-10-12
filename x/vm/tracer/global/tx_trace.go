@@ -15,7 +15,7 @@ type txTraceContext struct {
 
 // TxTraceFactory creates a standard transaction-wide collector. Applications
 // can pass this function to keeper.SetGlobalTracerFactories to opt in to
-// call-touch, native-transfer, and standard ERC20 transfer-call collection.
+// call, asset movement, balance and log collection.
 func TxTraceFactory(ctx sdk.Context, execution vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
 	collector := NewCollector()
 	return WithCollector(ctx, execution.TxIndex, collector), collector
@@ -32,14 +32,12 @@ func WithCollector(ctx sdk.Context, txIndex uint64, collector Collector) sdk.Con
 	})
 }
 
-// GetTxTrace returns call touches, native value transfers, and standard ERC20
-// transfer calls collected for txIndex in the current EVM execution context.
-// It returns nil slices when the context has no trace or belongs to a different
-// transaction.
-func GetTxTrace(ctx sdk.Context, txIndex uint64) (touches []TxCallTouch, transfers []TxValueTransfer, erc20Transfers []TxERC20Transfer) {
+// GetTxTrace returns the ordered journal and latched error for txIndex.
+// The error must be checked even when an EVM frame caught a child revert.
+func GetTxTrace(ctx sdk.Context, txIndex uint64) ([]vmtracer.Observation, error) {
 	trace, ok := ctx.Value(txTraceContextKey{}).(txTraceContext)
 	if !ok || trace.txIndex != txIndex || trace.collector == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
-	return trace.collector.Touches(), trace.collector.Transfers(), trace.collector.ERC20Transfers()
+	return trace.collector.Observations(), trace.collector.Error()
 }
