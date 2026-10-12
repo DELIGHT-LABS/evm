@@ -670,7 +670,10 @@ func (s *KeeperTestSuite) TestEstimateGas() {
 		{
 			"gas exceed allowance",
 			func() types.TransactionArgs {
-				return types.TransactionArgs{To: &common.Address{}, Gas: &gasHelper}
+				return types.TransactionArgs{
+					To:  &common.Address{},
+					Gas: &gasHelper,
+				}
 			},
 			true,
 			ethparams.TxGas,
@@ -782,7 +785,10 @@ func (s *KeeperTestSuite) TestEstimateGas() {
 		{
 			"gas exceed allowance w/ EnableFeemarket",
 			func() types.TransactionArgs {
-				return types.TransactionArgs{To: &common.Address{}, Gas: &gasHelper}
+				return types.TransactionArgs{
+					To:  &common.Address{},
+					Gas: &gasHelper,
+				}
 			},
 			true,
 			ethparams.TxGas,
@@ -1826,8 +1832,11 @@ func (s *KeeperTestSuite) TestEstimateGasCandidateStateIsDiscardedAndHooksSeePos
 				sawPostState = sawPostState || evmKeeper.GetBalance(ctx, recipient).Cmp(recipientBefore) > 0
 			}
 			if len(msg.Data) > 0 {
-				touches, _, _ := vmglobaltracer.GetTxTrace(ctx, 0)
-				sawTrace = sawTrace || len(touches) > 0
+				trace, traceErr := vmglobaltracer.GetTxTrace(ctx, 0)
+				if traceErr != nil {
+					return traceErr
+				}
+				sawTrace = sawTrace || len(trace) > 0
 			}
 			beforeMint := s.Network.App.GetBankKeeper().GetBalance(ctx, moduleAddr, mintedDenom)
 			sawCleanCandidate = sawCleanCandidate && beforeMint.IsZero()
@@ -3179,7 +3188,10 @@ func (s *KeeperTestSuite) TestEthCall() {
 		{
 			"invalid args",
 			func() *types.EthCallRequest {
-				return &types.EthCallRequest{Args: []byte("invalid args"), GasCap: config.DefaultGasCap}
+				return &types.EthCallRequest{
+					Args:   []byte("invalid args"),
+					GasCap: config.DefaultGasCap,
+				}
 			},
 			false,
 		},
@@ -3195,7 +3207,10 @@ func (s *KeeperTestSuite) TestEthCall() {
 				})
 				s.Require().NoError(err)
 
-				return &types.EthCallRequest{Args: args, GasCap: config.DefaultGasCap}
+				return &types.EthCallRequest{
+					Args:   args,
+					GasCap: config.DefaultGasCap,
+				}
 			},
 			false,
 		},
@@ -3208,7 +3223,10 @@ func (s *KeeperTestSuite) TestEthCall() {
 				})
 
 				s.Require().NoError(err)
-				req := &types.EthCallRequest{Args: args, GasCap: config.DefaultGasCap}
+				req := &types.EthCallRequest{
+					Args:   args,
+					GasCap: config.DefaultGasCap,
+				}
 
 				params := s.Network.App.GetEVMKeeper().GetParams(s.Network.GetContext())
 				params.AccessControl = types.AccessControl{
@@ -3231,7 +3249,10 @@ func (s *KeeperTestSuite) TestEthCall() {
 				})
 
 				s.Require().NoError(err)
-				req := &types.EthCallRequest{Args: args, GasCap: config.DefaultGasCap}
+				req := &types.EthCallRequest{
+					Args:   args,
+					GasCap: config.DefaultGasCap,
+				}
 
 				params := s.Network.App.GetEVMKeeper().GetParams(s.Network.GetContext())
 				params.AccessControl = types.AccessControl{
@@ -3295,7 +3316,7 @@ func (s *KeeperTestSuite) TestEthCallInstallsApplicationTracer() {
 	s.Require().NoError(err)
 	s.Require().False(res.Failed())
 	s.Require().NotNil(collector)
-	s.Require().NotEmpty(collector.Touches())
+	s.Require().NotEmpty(collector.Observations())
 }
 
 func (s *KeeperTestSuite) TestBalance() {

@@ -17,6 +17,7 @@ import (
 func TestTxTraceContext(t *testing.T) {
 	parent := sdk.Context{}.WithContext(context.Background())
 	collector := NewCollector()
+	collector.SetCodeReader(func(common.Address) []byte { return nil })
 	ctx := WithCollector(parent, 7, collector)
 
 	collector.Hooks().OnEnter(
@@ -29,30 +30,26 @@ func TestTxTraceContext(t *testing.T) {
 		big.NewInt(10),
 	)
 
-	touches, transfers, erc20Transfers := GetTxTrace(ctx, 7)
-	require.Len(t, touches, 1)
-	require.Len(t, transfers, 1)
-	require.Empty(t, erc20Transfers)
+	trace, err := GetTxTrace(ctx, 7)
+	require.NoError(t, err)
+	require.Len(t, trace, 1)
 
-	touches, transfers, erc20Transfers = GetTxTrace(ctx, 8)
-	require.Nil(t, touches)
-	require.Nil(t, transfers)
-	require.Nil(t, erc20Transfers)
+	trace, err = GetTxTrace(ctx, 8)
+	require.Nil(t, trace)
+	require.NoError(t, err)
 
-	touches, transfers, erc20Transfers = GetTxTrace(parent, 7)
-	require.Nil(t, touches)
-	require.Nil(t, transfers)
-	require.Nil(t, erc20Transfers)
+	trace, err = GetTxTrace(parent, 7)
+	require.Nil(t, trace)
+	require.NoError(t, err)
 }
 
 func TestTxTraceContextWithNilCollector(t *testing.T) {
 	ctx := sdk.Context{}.WithContext(context.Background())
 	ctx = WithCollector(ctx, 0, nil)
 
-	touches, transfers, erc20Transfers := GetTxTrace(ctx, 0)
-	require.Nil(t, touches)
-	require.Nil(t, transfers)
-	require.Nil(t, erc20Transfers)
+	trace, err := GetTxTrace(ctx, 0)
+	require.Nil(t, trace)
+	require.NoError(t, err)
 }
 
 func TestTxTraceFactory(t *testing.T) {
@@ -70,8 +67,7 @@ func TestTxTraceFactory(t *testing.T) {
 		big.NewInt(1),
 	)
 
-	touches, transfers, erc20Transfers := GetTxTrace(ctx, 3)
-	require.Len(t, touches, 1)
-	require.Len(t, transfers, 1)
-	require.Empty(t, erc20Transfers)
+	trace, err := GetTxTrace(ctx, 3)
+	require.Len(t, trace, 1)
+	require.ErrorContains(t, err, "code reader")
 }

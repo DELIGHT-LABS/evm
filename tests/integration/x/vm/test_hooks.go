@@ -12,6 +12,7 @@ import (
 	"github.com/cosmos/evm/contracts"
 	"github.com/cosmos/evm/x/vm/keeper"
 	"github.com/cosmos/evm/x/vm/statedb"
+	vmtracer "github.com/cosmos/evm/x/vm/tracer"
 	vmglobaltracer "github.com/cosmos/evm/x/vm/tracer/global"
 	"github.com/cosmos/evm/x/vm/types"
 
@@ -109,9 +110,20 @@ type txTraceByReceiptIndexHook struct {
 func (h *txTraceByReceiptIndexHook) PostTxProcessing(ctx sdk.Context, _ common.Address, _ core.Message, receipt *ethtypes.Receipt) error {
 	h.ReceiptIndex = receipt.TransactionIndex
 	before := ctx.GasMeter().GasConsumed()
-	touches, transfers, _ := vmglobaltracer.GetTxTrace(ctx, uint64(receipt.TransactionIndex))
-	h.Touches = len(touches)
-	h.Transfers = len(transfers)
+	trace, err := vmglobaltracer.GetTxTrace(ctx, uint64(receipt.TransactionIndex))
+	if err != nil {
+		return err
+	}
+	h.Touches = 0
+	h.Transfers = 0
+	for _, e := range trace {
+		if e.Kind == vmtracer.CallEnter {
+			h.Touches++
+		}
+		if e.Kind == vmtracer.NativeTransfer {
+			h.Transfers++
+		}
+	}
 	if h.Touches > 0 {
 		ctx.GasMeter().ConsumeGas(uint64(h.Touches)*1042, "policy get per call touch")
 	}
