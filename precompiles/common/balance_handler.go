@@ -109,7 +109,6 @@ func (bh *BalanceHandler) AfterBalanceChange(ctx sdk.Context, stateDB *statedb.S
 			}
 
 			stateDB.AddBalance(common.BytesToAddress(receiverAddr.Bytes()), amount, tracing.BalanceChangeUnspecified)
-<<<<<<< HEAD
 
 		case precisebanktypes.EventTypeFractionalBalanceChange:
 			addr, err := ParseAddress(event, precisebanktypes.AttributeKeyAddress)
@@ -118,7 +117,7 @@ func (bh *BalanceHandler) AfterBalanceChange(ctx sdk.Context, stateDB *statedb.S
 			}
 			if bh.bankKeeper.BlockedAddr(addr) {
 				// Bypass blocked addresses
-				continue
+				break
 			}
 
 			delta, err := ParseFractionalAmount(event)
@@ -136,12 +135,6 @@ func (bh *BalanceHandler) AfterBalanceChange(ctx sdk.Context, stateDB *statedb.S
 			} else if delta.Sign() == -1 {
 				stateDB.SubBalance(common.BytesToAddress(addr.Bytes()), deltaAbs, tracing.BalanceChangeUnspecified)
 			}
-
-		default:
-			// Non-balance events are already marked as processed above
-			continue
-=======
->>>>>>> e11256f (fix(precompiles): prevent duplicate balance event processing)
 		}
 
 		stateDB.MarkEventProcessed(eventIdx)
