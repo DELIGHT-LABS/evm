@@ -83,7 +83,7 @@ func (bh *BalanceHandler) AfterBalanceChange(ctx sdk.Context, stateDB *statedb.S
 			}
 			if bh.bankKeeper.BlockedAddr(spenderAddr) {
 				// Bypass blocked addresses
-				continue
+				break
 			}
 
 			amount, err := ParseAmount(event)
@@ -100,7 +100,7 @@ func (bh *BalanceHandler) AfterBalanceChange(ctx sdk.Context, stateDB *statedb.S
 			}
 			if bh.bankKeeper.BlockedAddr(receiverAddr) {
 				// Bypass blocked addresses
-				continue
+				break
 			}
 
 			amount, err := ParseAmount(event)
@@ -117,7 +117,7 @@ func (bh *BalanceHandler) AfterBalanceChange(ctx sdk.Context, stateDB *statedb.S
 			}
 			if bh.bankKeeper.BlockedAddr(addr) {
 				// Bypass blocked addresses
-				continue
+				break
 			}
 
 			delta, err := ParseFractionalAmount(event)
@@ -135,11 +135,9 @@ func (bh *BalanceHandler) AfterBalanceChange(ctx sdk.Context, stateDB *statedb.S
 			} else if delta.Sign() == -1 {
 				stateDB.SubBalance(common.BytesToAddress(addr.Bytes()), deltaAbs, tracing.BalanceChangeUnspecified)
 			}
-
-		default:
-			// Non-balance events are already marked as processed above
-			continue
 		}
+
+		stateDB.MarkEventProcessed(eventIdx)
 	}
 
 	return nil

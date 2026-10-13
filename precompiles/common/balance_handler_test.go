@@ -18,6 +18,7 @@ import (
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/cosmos/evm/x/vm/types/mocks"
 
+	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 
 	sdktestutil "github.com/cosmos/cosmos-sdk/testutil"
@@ -229,6 +230,66 @@ func TestAfterBalanceChange(t *testing.T) {
 
 	require.Equal(t, "2", stateDB.GetBalance(spender).String())
 	require.Equal(t, "3", stateDB.GetBalance(receiver).String())
+
+	err = bh.AfterBalanceChange(ctx, stateDB)
+	require.NoError(t, err)
+
+	require.Equal(t, "2", stateDB.GetBalance(spender).String(), "a second pass must not apply the same events")
+	require.Equal(t, "3", stateDB.GetBalance(receiver).String(), "a second pass must not apply the same events")
+}
+
+func TestAfterBalanceChangeFractionalEvents(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		delta      int64
+		expBalance string
+	}{
+		{name: "positive delta", delta: 3, expBalance: "11"},
+		{name: "negative delta", delta: -3, expBalance: "5"},
+		{name: "zero delta", delta: 0, expBalance: "8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupBalanceHandlerTest(t)
+
+			storeKey := storetypes.NewKVStoreKey("test")
+			tKey := storetypes.NewTransientStoreKey("test_t")
+			ctx := sdktestutil.DefaultContext(storeKey, tKey)
+			stateDB := statedb.New(ctx, mocks.NewEVMKeeper(), statedb.NewEmptyTxConfig())
+
+			_, addrs, err := testutil.GeneratePrivKeyAddressPairs(1)
+			require.NoError(t, err)
+			addr := addrs[0]
+			ethAddr := common.BytesToAddress(addr)
+			stateDB.AddBalance(ethAddr, uint256.NewInt(5), tracing.BalanceChangeUnspecified)
+
+			blockedAddr := authtypes.NewModuleAddress(precisebanktypes.ModuleName)
+			bankKeeper := cmnmocks.NewBankKeeper(t)
+			bankKeeper.On("BlockedAddr", mock.AnythingOfType("types.AccAddress")).Return(func(addr sdk.AccAddress) bool {
+				return addr.Equals(blockedAddr)
+			})
+			bh := cmn.NewBalanceHandlerFactory(bankKeeper).NewBalanceHandler()
+			bh.BeforeBalanceChange(ctx)
+
+			coins := sdk.NewCoins(sdk.NewInt64Coin(evmtypes.GetEVMCoinDenom(), 3))
+			ctx.EventManager().EmitEvents(sdk.Events{
+				banktypes.NewCoinSpentEvent(blockedAddr, coins),
+				banktypes.NewCoinReceivedEvent(blockedAddr, coins),
+				precisebanktypes.NewEventFractionalBalanceChange(blockedAddr, sdkmath.ZeroInt(), sdkmath.NewInt(3)),
+				sdk.NewEvent(sdk.EventTypeMessage),
+				precisebanktypes.NewEventFractionalBalanceChange(addr, sdkmath.NewInt(5), sdkmath.NewInt(5+tc.delta)),
+				banktypes.NewCoinReceivedEvent(addr, coins),
+			})
+
+			for pass := 0; pass < 2; pass++ {
+				require.NoError(t, bh.AfterBalanceChange(ctx, stateDB))
+				require.Equal(t, tc.expBalance, stateDB.GetBalance(ethAddr).String())
+				require.True(t, stateDB.GetBalance(common.BytesToAddress(blockedAddr)).IsZero())
+				for eventIdx := range ctx.EventManager().Events() {
+					require.True(t, stateDB.IsEventProcessed(eventIdx), "event %d must be consumed", eventIdx)
+				}
+			}
+		})
+	}
 }
 
 func TestAfterBalanceChangeErrors(t *testing.T) {
