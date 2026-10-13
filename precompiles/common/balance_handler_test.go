@@ -190,6 +190,12 @@ func TestAfterBalanceChange(t *testing.T) {
 
 	require.Equal(t, "2", stateDB.GetBalance(spender).String())
 	require.Equal(t, "3", stateDB.GetBalance(receiver).String())
+
+	err = bh.AfterBalanceChange(ctx, stateDB)
+	require.NoError(t, err)
+
+	require.Equal(t, "2", stateDB.GetBalance(spender).String(), "a second pass must not apply the same events")
+	require.Equal(t, "3", stateDB.GetBalance(receiver).String(), "a second pass must not apply the same events")
 }
 
 func TestAfterBalanceChangeErrors(t *testing.T) {
