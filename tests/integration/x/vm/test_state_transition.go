@@ -795,8 +795,8 @@ func (s *KeeperTestSuite) TestApplyTransactionWithTxPostProcessing() {
 					keeper.NewMultiEvmHooks(
 						&testHooks{
 							postProcessing: func(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error {
-								return s.Network.App.GetMintKeeper().MintCoins(
-									ctx, sdk.NewCoins(sdk.NewCoin("arandomcoin", sdkmath.NewInt(100))),
+								return s.Network.App.GetBankKeeper().MintCoins(
+									ctx, types.ModuleName, sdk.NewCoins(sdk.NewCoin("arandomcoin", sdkmath.NewInt(100))),
 								)
 							},
 						},
@@ -829,9 +829,9 @@ func (s *KeeperTestSuite) TestApplyTransactionWithTxPostProcessing() {
 				s.Require().Equal(recipientBefore, recipientAfter)
 			},
 			func(s *KeeperTestSuite) {
-				// check if the mint module has "arandomcoin" in its balance, it was minted in the post processing, proving that the post processing was called
+				// check if the EVM module has "arandomcoin" in its balance, it was minted in the post processing, proving that the post processing was called
 				// and that it can persist state even when the tx fails
-				balance := s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), s.Network.App.GetAccountKeeper().GetModuleAddress("mint"), "arandomcoin")
+				balance := s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), s.Network.App.GetAccountKeeper().GetModuleAddress(types.ModuleName), "arandomcoin")
 				s.Require().Equal(sdkmath.NewInt(100), balance.Amount)
 			},
 		},
@@ -845,9 +845,9 @@ func (s *KeeperTestSuite) TestApplyTransactionWithTxPostProcessing() {
 
 			// set bounded cosmos block gas limit
 			ctx := s.Network.GetContext().WithBlockGasMeter(storetypes.NewGasMeter(1e6))
-			err := s.Network.App.GetBankKeeper().MintCoins(ctx, "mint", sdk.NewCoins(sdk.NewCoin("aatom", sdkmath.NewInt(3e18))))
+			err := s.Network.App.GetBankKeeper().MintCoins(ctx, types.ModuleName, sdk.NewCoins(sdk.NewCoin("aatom", sdkmath.NewInt(3e18))))
 			s.Require().NoError(err)
-			err = s.Network.App.GetBankKeeper().SendCoinsFromModuleToModule(ctx, "mint", "fee_collector", sdk.NewCoins(sdk.NewCoin("aatom", sdkmath.NewInt(3e18))))
+			err = s.Network.App.GetBankKeeper().SendCoinsFromModuleToModule(ctx, types.ModuleName, "fee_collector", sdk.NewCoins(sdk.NewCoin("aatom", sdkmath.NewInt(3e18))))
 			s.Require().NoError(err)
 
 			tc.do(s)
@@ -866,8 +866,8 @@ func (s *KeeperTestSuite) TestApplyTransactionPostTxHookOutOfGasUsesFullLimitAnd
 	)
 	hook := &testHooks{
 		postProcessing: func(ctx sdk.Context, _ common.Address, _ core.Message, _ *gethtypes.Receipt) error {
-			err := s.Network.App.GetMintKeeper().MintCoins(
-				ctx,
+			err := s.Network.App.GetBankKeeper().MintCoins(
+				ctx, types.ModuleName,
 				sdk.NewCoins(sdk.NewInt64Coin(mintedDenom, 1)),
 			)
 			s.Require().NoError(err)
@@ -905,7 +905,7 @@ func (s *KeeperTestSuite) TestApplyTransactionPostTxHookOutOfGasUsesFullLimitAnd
 	recipientAfter := s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), recipient.Bytes(), types.GetEVMCoinDenom())
 	s.Require().Equal(senderBefore, senderAfter)
 	s.Require().Equal(recipientBefore, recipientAfter)
-	moduleAddr := s.Network.App.GetAccountKeeper().GetModuleAddress("mint")
+	moduleAddr := s.Network.App.GetAccountKeeper().GetModuleAddress(types.ModuleName)
 	s.Require().True(s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), moduleAddr, mintedDenom).IsZero())
 }
 

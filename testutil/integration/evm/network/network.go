@@ -53,7 +53,7 @@ type Network interface {
 	GetMintClient() minttypes.QueryClient
 }
 
-type CreateEvmApp func(chainID string, evmChainID uint64, customBaseAppOptions ...func(*baseapp.BaseApp)) evm.EvmApp
+type CreateEvmApp func(chainID string, evmChainID uint64, customBaseAppOptions ...func(*baseapp.BaseApp)) evm.IntegrationNetworkApp
 
 var _ Network = (*IntegrationNetwork)(nil)
 
@@ -62,12 +62,18 @@ type IntegrationNetwork struct {
 	cfg         Config
 	ctx         sdktypes.Context
 	validators  []stakingtypes.Validator
-	app         evm.EvmApp
+	app         evm.IntegrationNetworkApp
 	baseDecimal evmtypes.Decimals
 
 	// This is only needed for IBC chain testing setup
 	valSet     *cmttypes.ValidatorSet
 	valSigners map[string]cmttypes.PrivValidator
+}
+
+// CoreApp returns the underlying app for checking optional keeper providers.
+// UnitTestNetwork.App is an adapter and can expose providers the app lacks.
+func (n *IntegrationNetwork) CoreApp() evm.IntegrationNetworkApp {
+	return n.app
 }
 
 // New configures and initializes a new integration Network instance with
@@ -107,7 +113,7 @@ var PrefundedAccountInitialBalance, _ = sdkmath.NewIntFromString("100_000_000_00
 
 // configureAndInitChain initializes the network with the given configuration.
 // It creates the genesis state and starts the network.
-func (n *IntegrationNetwork) configureAndInitChain(evmApp evm.EvmApp) error {
+func (n *IntegrationNetwork) configureAndInitChain(evmApp evm.IntegrationNetworkApp) error {
 	// --------------------------------------------------------------------------------------------
 	// Apply changes deriving from possible config options
 	// FIX: for sure there exists a better way to achieve that.

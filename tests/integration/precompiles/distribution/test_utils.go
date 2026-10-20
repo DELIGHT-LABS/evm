@@ -4,12 +4,12 @@ import (
 	evmaddress "github.com/cosmos/evm/encoding/address"
 	"github.com/cosmos/evm/precompiles/staking"
 	"github.com/cosmos/evm/testutil/keyring"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
-	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
@@ -58,7 +58,7 @@ func (s *PrecompileTestSuite) mintCoinsForDistrMod(ctx sdk.Context, amount sdk.C
 	// Minting tokens for the FeeCollector to simulate fee accrued.
 	if err := s.network.App.GetBankKeeper().MintCoins(
 		ctx,
-		minttypes.ModuleName,
+		evmtypes.ModuleName,
 		amount,
 	); err != nil {
 		return err
@@ -66,7 +66,7 @@ func (s *PrecompileTestSuite) mintCoinsForDistrMod(ctx sdk.Context, amount sdk.C
 
 	return s.network.App.GetBankKeeper().SendCoinsFromModuleToModule(
 		ctx,
-		minttypes.ModuleName,
+		evmtypes.ModuleName,
 		distrtypes.ModuleName,
 		amount,
 	)
@@ -76,10 +76,10 @@ func (s *PrecompileTestSuite) mintCoinsForDistrMod(ctx sdk.Context, amount sdk.C
 // base denomination.
 func (s *PrecompileTestSuite) fundAccountWithBaseDenom(ctx sdk.Context, addr sdk.AccAddress, amount math.Int) error {
 	coins := sdk.NewCoins(sdk.NewCoin(s.bondDenom, amount))
-	if err := s.network.App.GetBankKeeper().MintCoins(ctx, minttypes.ModuleName, coins); err != nil {
+	if err := s.network.App.GetBankKeeper().MintCoins(ctx, evmtypes.ModuleName, coins); err != nil {
 		return err
 	}
-	return s.network.App.GetBankKeeper().SendCoinsFromModuleToAccount(ctx, minttypes.ModuleName, addr, coins)
+	return s.network.App.GetBankKeeper().SendCoinsFromModuleToAccount(ctx, evmtypes.ModuleName, addr, coins)
 }
 
 func (s *PrecompileTestSuite) getStakingPrecompile() *staking.Precompile {
