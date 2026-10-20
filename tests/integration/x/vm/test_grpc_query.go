@@ -1812,7 +1812,7 @@ func (s *KeeperTestSuite) TestEstimateGasCandidateStateIsDiscardedAndHooksSeePos
 	recipient := s.Keyring.GetAddr(1)
 	evmKeeper := s.Network.App.GetEVMKeeper()
 	recipientBefore := new(uint256.Int).Set(evmKeeper.GetBalance(s.Network.GetContext(), recipient))
-	moduleAddr := s.Network.App.GetAccountKeeper().GetModuleAddress("mint")
+	moduleAddr := s.Network.App.GetAccountKeeper().GetModuleAddress(types.ModuleName)
 
 	var sawPostState, sawTrace, sawCleanCandidate bool
 	sawCleanCandidate = true
@@ -1827,8 +1827,8 @@ func (s *KeeperTestSuite) TestEstimateGasCandidateStateIsDiscardedAndHooksSeePos
 			}
 			beforeMint := s.Network.App.GetBankKeeper().GetBalance(ctx, moduleAddr, mintedDenom)
 			sawCleanCandidate = sawCleanCandidate && beforeMint.IsZero()
-			return s.Network.App.GetMintKeeper().MintCoins(
-				ctx,
+			return s.Network.App.GetBankKeeper().MintCoins(
+				ctx, types.ModuleName,
 				sdk.NewCoins(sdk.NewInt64Coin(mintedDenom, 1)),
 			)
 		},

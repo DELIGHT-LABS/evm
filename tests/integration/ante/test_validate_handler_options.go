@@ -15,7 +15,14 @@ import (
 //nolint:thelper // RunValidateHandlerOptionsTest is not a helper function; it's an externally called benchmark entry point
 func RunValidateHandlerOptionsTest(t *testing.T, create network.CreateEvmApp, options ...network.ConfigOption) {
 	nw := network.NewUnitTestNetwork(create, options...)
-	ibcKeeper := nw.App.(evm.IBCKeeperProvider).GetIBCKeeper()
+	optional := ante.HandlerOptions{}
+	if provider, ok := nw.CoreApp().(evm.IBCKeeperProvider); ok {
+		optional.IBCKeeper = provider.GetIBCKeeper()
+	}
+	if provider, ok := nw.CoreApp().(evm.FeeGrantKeeperProvider); ok {
+		optional.FeegrantKeeper = provider.GetFeeGrantKeeper()
+	}
+	ibcKeeper := optional.IBCKeeper
 	cases := []struct {
 		name    string
 		options ante.HandlerOptions
@@ -40,16 +47,6 @@ func RunValidateHandlerOptionsTest(t *testing.T, create network.CreateEvmApp, op
 				Cdc:           nw.App.AppCodec(),
 				AccountKeeper: nw.App.GetAccountKeeper(),
 				BankKeeper:    nil,
-			},
-			false,
-		},
-		{
-			"fail - empty IBC keeper",
-			ante.HandlerOptions{
-				Cdc:           nw.App.AppCodec(),
-				AccountKeeper: nw.App.GetAccountKeeper(),
-				BankKeeper:    nw.App.GetBankKeeper(),
-				IBCKeeper:     nil,
 			},
 			false,
 		},
@@ -125,7 +122,7 @@ func RunValidateHandlerOptionsTest(t *testing.T, create network.CreateEvmApp, op
 				BankKeeper:             nw.App.GetBankKeeper(),
 				ExtensionOptionChecker: antetypes.HasDynamicFeeExtensionOption,
 				EvmKeeper:              nw.App.GetEVMKeeper(),
-				FeegrantKeeper:         nw.App.GetFeeGrantKeeper(),
+				FeegrantKeeper:         optional.FeegrantKeeper,
 				IBCKeeper:              ibcKeeper,
 				FeeMarketKeeper:        nw.App.GetFeeMarketKeeper(),
 				SignModeHandler:        nw.GetEncodingConfig().TxConfig.SignModeHandler(),
@@ -144,7 +141,7 @@ func RunValidateHandlerOptionsTest(t *testing.T, create network.CreateEvmApp, op
 				BankKeeper:             nw.App.GetBankKeeper(),
 				ExtensionOptionChecker: antetypes.HasDynamicFeeExtensionOption,
 				EvmKeeper:              nw.App.GetEVMKeeper(),
-				FeegrantKeeper:         nw.App.GetFeeGrantKeeper(),
+				FeegrantKeeper:         optional.FeegrantKeeper,
 				IBCKeeper:              ibcKeeper,
 				FeeMarketKeeper:        nw.App.GetFeeMarketKeeper(),
 				SignModeHandler:        nw.GetEncodingConfig().TxConfig.SignModeHandler(),
