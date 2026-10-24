@@ -39,19 +39,19 @@ type UserOperationEvidence struct {
 }
 
 // Observation is an immutable snapshot delivered in execution order. IDs are
-// execution-local and shared by every observer and session. FrameID identifies
-// the active frame; ParentFrameID is zero for roots. A CallEnter is an attempt,
-// even if its frame or an ancestor later reverts. BalanceChange is a delta,
+// execution-local and shared by every observer and session. CallID identifies
+// the active call; ParentCallID is zero for roots. A CallEnter is an attempt,
+// even if its call or an ancestor later reverts. BalanceChange is a delta,
 // whereas NativeTransfer records an executed balance transfer. ERC20Call is
 // request evidence; Log retains the contract emission for resolver correlation.
 type Observation struct {
-	OccurrenceID     uint64
-	FrameID          uint64
-	ParentFrameID    uint64
+	ObservationID    uint64
+	CallID           uint64
+	ParentCallID     uint64
 	Kind             ObservationKind
 	Opcode           byte
 	Depth            int
-	Status           FrameStatus
+	Status           CallStatus
 	Caller           common.Address
 	Target           common.Address
 	ExecutionAddress common.Address
@@ -77,9 +77,9 @@ type Observation struct {
 // survive EVM reverts, including reverts caught by an ancestor.
 type Observer func(Observation) error
 
-// FrameStatus reports the local exit and current effective rollback status.
+// CallStatus reports the local exit and current effective rollback status.
 // Success is provisional while ancestors are still executing.
-type FrameStatus struct {
+type CallStatus struct {
 	Exited   bool
 	Success  bool
 	Reverted bool
@@ -91,8 +91,8 @@ type FrameStatus struct {
 type Journal interface {
 	Tracer
 	Observations() []Observation
-	CurrentFrame() (Observation, bool)
-	LastOccurrence() uint64
+	CurrentCall() (Observation, bool)
+	LastObservationID() uint64
 	SetCodeReader(func(common.Address) []byte) func()
 	RecordNativeTransfer(common.Address, common.Address, *big.Int)
 	LatchError(error)

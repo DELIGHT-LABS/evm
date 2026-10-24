@@ -66,7 +66,7 @@ func (p *sessionTracerPrecompile) Run(evm *gethvm.EVM, contract *gethvm.Contract
 		defer uninstall()
 
 		_, _, err = evm.Call(contract.Address(), p.target, nil, contract.Gas, uint256.NewInt(0))
-		p.activeAfterDirectCall = p.manager.HasActiveFrame()
+		p.activeAfterDirectCall = p.manager.HasActiveCall()
 		if err == nil && p.keeper != nil {
 			stateDB, ok := evm.StateDB.(*statedb.StateDB)
 			if !ok {
@@ -222,7 +222,7 @@ func (s *KeeperTestSuite) TestQueryPathsProvideSessionTracerManager() {
 				seen := make(map[*vmtracer.Manager]bool)
 				for _, manager := range precompile.managers {
 					s.Require().NotNil(manager)
-					s.Require().False(manager.HasActiveFrame())
+					s.Require().False(manager.HasActiveCall())
 					s.Require().False(seen[manager], "each candidate/transaction needs a fresh manager")
 					seen[manager] = true
 				}
@@ -233,7 +233,7 @@ func (s *KeeperTestSuite) TestQueryPathsProvideSessionTracerManager() {
 					factoryManagers := make(map[*vmtracer.Manager]bool)
 					for _, manager := range managers {
 						s.Require().False(factoryManagers[manager])
-						s.Require().False(manager.HasActiveFrame())
+						s.Require().False(manager.HasActiveCall())
 						factoryManagers[manager] = true
 					}
 					for manager := range seen {
@@ -320,7 +320,7 @@ func (s *KeeperTestSuite) TestSameVMReentryPreservesSessionTracerForKeeperCalls(
 		s.Require().Same(manager, precompile.manager)
 		s.Require().True(precompile.activeAfterDirectCall)
 	}
-	s.Require().False(manager.HasActiveFrame())
+	s.Require().False(manager.HasActiveCall())
 	s.Require().Equal([]int{1, 1, 2, 2}, precompiles[0].enterDepths)
 	s.Require().Equal([]int{2, 2}, precompiles[1].enterDepths)
 
@@ -712,14 +712,14 @@ func (s *KeeperTestSuite) TestCollectorRetainsChildMovementAfterParentRevert() {
 	s.Require().Equal(parent, transfers[1].From)
 	s.Require().Equal(recipient, transfers[1].To)
 	s.Require().Equal(int64(7), transfers[1].Amount.Int64())
-	s.Require().NotEqual(transfers[0].OccurrenceID, transfers[1].OccurrenceID)
+	s.Require().NotEqual(transfers[0].ObservationID, transfers[1].ObservationID)
 	for _, transfer := range transfers {
 		s.Require().True(transfer.Status.Reverted)
 		s.Require().False(transfer.Status.Success)
 	}
 	childSucceeded := false
 	for _, e := range collector.Observations() {
-		if e.Kind == vmtracer.CallExit && e.FrameID == transfers[1].FrameID {
+		if e.Kind == vmtracer.CallExit && e.CallID == transfers[1].CallID {
 			s.Require().NoError(e.Err)
 			s.Require().False(e.Reverted)
 			s.Require().True(e.Status.Reverted)
@@ -772,13 +772,13 @@ func (s *KeeperTestSuite) TestCollectorTokenRequestAndRawLog() {
 	s.Require().NotNil(enter)
 	s.Require().NotNil(request)
 	s.Require().NotNil(emission)
-	s.Require().Equal(enter.FrameID, request.FrameID)
-	s.Require().Equal(enter.FrameID, emission.FrameID)
+	s.Require().Equal(enter.CallID, request.CallID)
+	s.Require().Equal(enter.CallID, emission.CallID)
 	s.Require().Equal(enter.Input, request.Input)
 	s.Require().Equal(sender.Addr, request.Caller)
 	s.Require().Equal(token, request.Target)
-	s.Require().Less(enter.OccurrenceID, request.OccurrenceID)
-	s.Require().Less(request.OccurrenceID, emission.OccurrenceID)
+	s.Require().Less(enter.ObservationID, request.ObservationID)
+	s.Require().Less(request.ObservationID, emission.ObservationID)
 	s.Require().Equal(common.BytesToHash(sender.Addr.Bytes()), emission.Log.Topics[1])
 	s.Require().Equal(common.BytesToHash(recipient.Bytes()), emission.Log.Topics[2])
 	s.Require().Equal(int64(1000), new(big.Int).SetBytes(emission.Log.Data).Int64())

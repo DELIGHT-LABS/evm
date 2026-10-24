@@ -24,7 +24,7 @@ type Manager struct {
 
 	// Each OnEnter pushes its VM-reported depth. The stack length determines
 	// the logical depth across both native reentry and nested VM instances.
-	frameDepths    []int
+	callDepths     []int
 	journal        Journal
 	observationErr error
 
@@ -74,10 +74,10 @@ func (m *Manager) NestedHooks() *tracing.Hooks {
 	return m.nestedHooks
 }
 
-// HasActiveFrame reports whether the manager is tracing an EVM call frame.
+// HasActiveCall reports whether the manager is tracing an EVM call.
 // A manager can remain in a StateDB context after its execution has ended.
-func (m *Manager) HasActiveFrame() bool {
-	return m != nil && len(m.frameDepths) > 0
+func (m *Manager) HasActiveCall() bool {
+	return m != nil && len(m.callDepths) > 0
 }
 
 func (m *Manager) install(tracer Tracer, session bool) func() {
@@ -86,7 +86,7 @@ func (m *Manager) install(tracer Tracer, session bool) func() {
 	}
 
 	if journal, ok := tracer.(Journal); ok {
-		if m.HasActiveFrame() || m.journal != nil || journal.LastOccurrence() != 0 {
+		if m.HasActiveCall() || m.journal != nil || journal.LastObservationID() != 0 {
 			m.LatchError(errors.New("execution journal must be installed once before execution"))
 			return func() {}
 		}
@@ -154,27 +154,27 @@ func (m *Manager) rebuild() {
 		ordered = append(ordered, entry.hooks)
 	}
 
-	composed := m.withFrameTracking(compose(ordered))
+	composed := m.withCallTracking(compose(ordered))
 	*m.hooks = composed
 	composed.OnTxStart = nil
 	composed.OnTxEnd = nil
 	*m.nestedHooks = composed
 }
 
-func (m *Manager) withFrameTracking(hooks tracing.Hooks) tracing.Hooks {
+func (m *Manager) withCallTracking(hooks tracing.Hooks) tracing.Hooks {
 	out := hooks
 	out.OnEnter = func(depth int, typ byte, from, to common.Address, input []byte, gas uint64, value *big.Int) {
-		logicalDepth := len(m.frameDepths)
-		m.frameDepths = append(m.frameDepths, depth)
+		logicalDepth := len(m.callDepths)
+		m.callDepths = append(m.callDepths, depth)
 		if hooks.OnEnter != nil {
 			hooks.OnEnter(logicalDepth, typ, from, to, input, gas, value)
 		}
 	}
 	out.OnExit = func(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-		if m.HasActiveFrame() {
-			frame := len(m.frameDepths) - 1
-			depth = frame
-			defer func() { m.frameDepths = m.frameDepths[:frame] }()
+		if m.HasActiveCall() {
+			call := len(m.callDepths) - 1
+			depth = call
+			defer func() { m.callDepths = m.callDepths[:call] }()
 		}
 		if hooks.OnExit != nil {
 			hooks.OnExit(depth, output, gasUsed, err, reverted)
@@ -182,25 +182,25 @@ func (m *Manager) withFrameTracking(hooks tracing.Hooks) tracing.Hooks {
 	}
 	if hooks.OnOpcode != nil {
 		out.OnOpcode = func(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, returnData []byte, depth int, err error) {
-			hooks.OnOpcode(pc, op, gas, cost, scope, returnData, depth+m.frameDepthOffset(), err)
+			hooks.OnOpcode(pc, op, gas, cost, scope, returnData, depth+m.callDepthOffset(), err)
 		}
 	}
 	if hooks.OnFault != nil {
 		out.OnFault = func(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, depth int, err error) {
-			hooks.OnFault(pc, op, gas, cost, scope, depth+m.frameDepthOffset(), err)
+			hooks.OnFault(pc, op, gas, cost, scope, depth+m.callDepthOffset(), err)
 		}
 	}
 	return out
 }
 
-// Opcode and fault depths are relative to the active VM frame (normally one
+// Opcode and fault depths are relative to the active VM call (normally one
 // greater than OnEnter's depth). Preserve that relationship in the logical tree.
-func (m *Manager) frameDepthOffset() int {
-	if !m.HasActiveFrame() {
+func (m *Manager) callDepthOffset() int {
+	if !m.HasActiveCall() {
 		return 0
 	}
-	frame := len(m.frameDepths) - 1
-	return frame - m.frameDepths[frame]
+	call := len(m.callDepths) - 1
+	return call - m.callDepths[call]
 }
 
 func compose(hooks []tracing.Hooks) tracing.Hooks {

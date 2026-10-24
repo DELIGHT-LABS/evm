@@ -40,8 +40,8 @@ func TestRequestsNativeTransfersAndLogsStayDistinct(t *testing.T) {
 	require.Len(t, facts, len(kinds))
 	for i, e := range facts {
 		require.Equal(t, kinds[i], e.Kind)
-		require.Equal(t, uint64(i+1), e.OccurrenceID)
-		require.Equal(t, uint64(1), e.FrameID)
+		require.Equal(t, uint64(i+1), e.ObservationID)
+		require.Equal(t, uint64(1), e.CallID)
 		require.True(t, e.Status.Reverted)
 	}
 	require.Equal(t, input, facts[1].Input)
@@ -50,7 +50,7 @@ func TestRequestsNativeTransfersAndLogsStayDistinct(t *testing.T) {
 	require.Equal(t, from, facts[2].From)
 	require.Equal(t, to, facts[2].To)
 	require.Equal(t, int64(7), facts[2].Amount.Int64())
-	require.NotEqual(t, facts[3].OccurrenceID, facts[4].OccurrenceID)
+	require.NotEqual(t, facts[3].ObservationID, facts[4].ObservationID)
 	assertMarooTraceStructure(t, facts)
 	facts[1].Input[0] = 0
 	facts[2].Amount.SetInt64(99)
@@ -63,7 +63,7 @@ func TestRequestsNativeTransfersAndLogsStayDistinct(t *testing.T) {
 	require.NoError(t, c.Error())
 }
 
-func TestTokenAnnotationsOnlyBelongToCallFrames(t *testing.T) {
+func TestTokenAnnotationsOnlyBelongToCalls(t *testing.T) {
 	for _, op := range []vm.OpCode{vm.CALL, vm.DELEGATECALL, vm.CALLCODE, vm.STATICCALL, vm.CREATE, vm.CREATE2} {
 		t.Run(op.String(), func(t *testing.T) {
 			m, c := rawManager(t, 100)
@@ -110,21 +110,21 @@ func TestLogsRemainUninterpreted(t *testing.T) {
 	assertMarooTraceStructure(t, facts)
 }
 
-func TestSelfDestructMovementUsesEnclosingCallFrame(t *testing.T) {
+func TestSelfDestructMovementUsesEnclosingCall(t *testing.T) {
 	m, c := rawManager(t, 100)
 	from, to := common.HexToAddress("0xaa"), common.HexToAddress("0xbb")
 	m.Hooks().OnEnter(0, byte(vm.CALL), to, from, nil, 100, nil)
 	m.Hooks().OnEnter(1, byte(vm.SELFDESTRUCT), from, to, nil, 0, big.NewInt(7))
 	m.Hooks().OnExit(1, nil, 0, nil, false)
-	frame, ok := c.CurrentFrame()
+	call, ok := c.CurrentCall()
 	require.True(t, ok)
-	require.Equal(t, uint64(1), frame.FrameID)
+	require.Equal(t, uint64(1), call.CallID)
 	m.Hooks().OnExit(0, nil, 0, nil, false)
 	facts := c.Observations()
 	require.Len(t, facts, 3)
 	require.Equal(t, vmtracer.NativeTransfer, facts[1].Kind)
 	require.Equal(t, byte(vm.SELFDESTRUCT), facts[1].Opcode)
-	require.Equal(t, uint64(1), facts[1].FrameID)
+	require.Equal(t, uint64(1), facts[1].CallID)
 	require.Equal(t, from, facts[1].From)
 	require.Equal(t, to, facts[1].To)
 	require.NoError(t, c.Error())
@@ -155,18 +155,18 @@ func nativeRecords(events []vmtracer.Observation) []vmtracer.Observation {
 }
 
 // Mirror the consumer's structural requirements: one request annotation per
-// CALL frame, identical calldata, active-frame ownership and distinct nonzero
+// CALL call, identical calldata, active-call ownership and distinct nonzero
 // observation IDs. The adapter can retain every ID instead of synthesizing one.
 func assertMarooTraceStructure(t *testing.T, events []vmtracer.Observation) {
 	t.Helper()
-	frames := map[uint64]vmtracer.Observation{}
+	calls := map[uint64]vmtracer.Observation{}
 	annotated := map[uint64]bool{}
 	seen := map[uint64]bool{}
 	var stack []uint64
 	for _, e := range events {
-		require.NotZero(t, e.OccurrenceID)
-		require.False(t, seen[e.OccurrenceID])
-		seen[e.OccurrenceID] = true
+		require.NotZero(t, e.ObservationID)
+		require.False(t, seen[e.ObservationID])
+		seen[e.ObservationID] = true
 		if e.Kind == vmtracer.BalanceChange {
 			continue
 		} // diagnostic, not an asset observation
@@ -175,20 +175,20 @@ func assertMarooTraceStructure(t *testing.T, events []vmtracer.Observation) {
 			if len(stack) > 0 {
 				parent = stack[len(stack)-1]
 			}
-			require.Equal(t, parent, e.ParentFrameID)
+			require.Equal(t, parent, e.ParentCallID)
 			require.Contains(t, []byte{byte(vm.CALL), byte(vm.DELEGATECALL), byte(vm.CALLCODE), byte(vm.STATICCALL), byte(vm.CREATE), byte(vm.CREATE2)}, e.Opcode)
-			frames[e.FrameID] = e
-			stack = append(stack, e.FrameID)
+			calls[e.CallID] = e
+			stack = append(stack, e.CallID)
 			continue
 		}
 		require.NotEmpty(t, stack)
-		require.Equal(t, stack[len(stack)-1], e.FrameID)
+		require.Equal(t, stack[len(stack)-1], e.CallID)
 		switch e.Kind {
 		case vmtracer.ERC20Call:
-			enter := frames[e.FrameID]
+			enter := calls[e.CallID]
 			require.Equal(t, byte(vm.CALL), enter.Opcode)
-			require.False(t, annotated[e.FrameID])
-			annotated[e.FrameID] = true
+			require.False(t, annotated[e.CallID])
+			annotated[e.CallID] = true
 			require.Equal(t, enter.Caller, e.Caller)
 			require.Equal(t, enter.Target, e.Target)
 			require.True(t, bytes.Equal(enter.Input, e.Input))

@@ -23,7 +23,7 @@ func (s *StateDB) AttachTracerManager(manager *vmtracer.Manager) {
 }
 
 // Rollback mutates the StateDB journal directly and does not emit fresh balance
-// or log occurrences. Frame exit observations carry the rollback decision.
+// or log observations. Call exit observations carry the rollback decision.
 func (s *StateDB) tracingHooks() *tracing.Hooks {
 	if manager, ok := vmtracer.FromContext(s.ctx); ok {
 		return manager.Hooks()

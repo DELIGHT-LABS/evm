@@ -58,13 +58,13 @@ func TestObservationIdentitySessionAndAncestorRollback(t *testing.T) {
 	view := viewRange.Observations()
 	require.Len(t, view, len(local))
 	for i := range local {
-		require.Equal(t, local[i].OccurrenceID, view[i].OccurrenceID)
+		require.Equal(t, local[i].ObservationID, view[i].ObservationID)
 		require.True(t, view[i].Status.Reverted)
 	}
-	require.Equal(t, uint64(1), viewRange.FrameID)
-	require.Equal(t, uint64(2), local[0].FrameID)
-	require.Equal(t, uint64(1), local[0].ParentFrameID)
-	require.NotEqual(t, local[1].OccurrenceID, local[2].OccurrenceID)
+	require.Equal(t, uint64(1), viewRange.CallID)
+	require.Equal(t, uint64(2), local[0].CallID)
+	require.Equal(t, uint64(1), local[0].ParentCallID)
+	require.NotEqual(t, local[1].ObservationID, local[2].ObservationID)
 	local[1].Amount.SetInt64(999)
 	local[3].Log.Data[0] = 99
 	require.Equal(t, int64(3), collector.Observations()[2].Amount.Int64())
@@ -84,7 +84,7 @@ func TestObservationRequestsAreNotMovements(t *testing.T) {
 	facts := collector.Observations()
 	require.Len(t, facts, 3)
 	require.Equal(t, vmtracer.ERC20Call, facts[1].Kind)
-	require.NotEqual(t, facts[0].OccurrenceID, facts[1].OccurrenceID)
+	require.NotEqual(t, facts[0].ObservationID, facts[1].ObservationID)
 	require.Equal(t, input, facts[0].Input)
 	require.Empty(t, nativeRecords(collector.Observations()))
 	for _, op := range []vm.OpCode{vm.DELEGATECALL, vm.CALLCODE, vm.STATICCALL} {
@@ -101,7 +101,7 @@ func TestObservationLatchSurvivesCaughtRevertAndBudget(t *testing.T) {
 	m, collector := rawManager(t, 3)
 	violation := errors.New("policy violation")
 	_, err := collector.Observe(func(e vmtracer.Observation) error {
-		if e.FrameID == 2 {
+		if e.CallID == 2 {
 			return violation
 		}
 		return nil
@@ -213,19 +213,19 @@ func TestSessionRejectsJournalWithoutRejectingExecution(t *testing.T) {
 	require.NoError(t, empty.ExecutionError())
 }
 
-func TestSessionBeginRequiresActiveFrame(t *testing.T) {
+func TestSessionBeginRequiresActiveCall(t *testing.T) {
 	m, _ := rawManager(t, 100)
 	ctx := vmtracer.WithManager(sdk.Context{}.WithContext(context.Background()), m)
 	_, err := vmsession.Begin(ctx)
-	require.ErrorContains(t, err, "active execution frame")
+	require.ErrorContains(t, err, "active execution call")
 	m.Hooks().OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, nil, 100, nil)
 	view, err := vmsession.Begin(ctx)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), view.FrameID)
+	require.Equal(t, uint64(1), view.CallID)
 	m.Hooks().OnExit(0, nil, 0, nil, false)
 	view.Close()
 	_, err = vmsession.Begin(ctx)
-	require.ErrorContains(t, err, "active execution frame")
+	require.ErrorContains(t, err, "active execution call")
 }
 
 func TestObserverCoverageFailureRejectsExecution(t *testing.T) {

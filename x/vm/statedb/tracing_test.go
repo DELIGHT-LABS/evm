@@ -89,7 +89,7 @@ func TestStateDBObservationsPreserveRevertedFacts(t *testing.T) {
 	require.Equal(t, int64(7), facts[2].CurrentBalance.Int64())
 	require.Equal(t, int64(2), facts[3].CurrentBalance.Int64())
 	require.Equal(t, vmtracer.Log, facts[4].Kind)
-	require.Equal(t, uint64(1), facts[4].FrameID)
+	require.Equal(t, uint64(1), facts[4].CallID)
 	require.True(t, facts[4].Status.Reverted)
 	log.Data[0] = 99
 	require.Equal(t, byte(7), facts[4].Log.Data[0])
