@@ -603,7 +603,10 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 
 	if manager, ok := vmtracer.FromContext(ctx); ok {
 		if executionErr := manager.ExecutionError(); executionErr != nil {
-			return nil, 0, errorsmod.Wrap(executionErr, "EVM execution rejected")
+			return &types.MsgEthereumTxResponse{
+				GasUsed:    gasUsed,
+				MaxUsedGas: maxUsedGas,
+			}, temporaryGasUsed, errorsmod.Wrap(executionErr, "EVM execution rejected")
 		}
 	}
 

@@ -877,3 +877,67 @@ func (s *KeeperTestSuite) TestCollectorEnforcementCoverageAndFinalization() {
 		})
 	}
 }
+
+func (s *KeeperTestSuite) TestCallEVMChargesGasOnPolicyRejection() {
+	for _, view := range []bool{false, true} {
+		var acceptedGas uint64
+		for _, reject := range []bool{false, true} {
+			s.Run(fmt.Sprintf("view=%t/reject=%t", view, reject), func() {
+				s.SetupTest()
+				ctx := s.Network.GetContext().
+					WithGasMeter(storetypes.NewGasMeter(1_000_000)).
+					WithKVGasConfig(storetypes.GasConfig{}).
+					WithTransientKVGasConfig(storetypes.GasConfig{})
+				keeper := s.Network.App.GetEVMKeeper()
+				sender := s.Keyring.GetAddr(0)
+				recipient := common.HexToAddress("0x000000000000000000000000000000000000eeef")
+				db := statedb.New(ctx, keeper, statedb.NewEmptyTxConfig())
+				// Write 1 to storage slot 0, then STOP.
+				db.SetCode(recipient, common.FromHex("0x600160005500"), tracing.CodeChangeUnspecified)
+				s.Require().NoError(db.Commit())
+				rejection := errors.New("final policy rejected")
+				var executionGas uint64
+				ends := 0
+				keeper.SetGlobalTracerFactories(func(factoryCtx sdk.Context, _ vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+					manager, ok := vmtracer.FromContext(factoryCtx)
+					s.Require().True(ok)
+					return factoryCtx, vmsessiontracer.New(&tracing.Hooks{
+						OnTxEnd: func(receipt *ethtypes.Receipt, _ error) {
+							ends++
+							executionGas = receipt.GasUsed
+							if reject {
+								manager.LatchError(rejection)
+							}
+						},
+					})
+				})
+				beforeGas := ctx.GasMeter().GasConsumed()
+				var response *evmtypes.MsgEthereumTxResponse
+				var err error
+				if view {
+					response, err = keeper.CallEVMViewWithData(ctx, sender, &recipient, nil, big.NewInt(100_000))
+				} else {
+					response, err = keeper.CallEVMWithData(ctx, statedb.New(ctx, keeper, statedb.NewEmptyTxConfig()), sender, &recipient, nil, true, false, big.NewInt(100_000))
+				}
+				s.Require().NotNil(response)
+				s.Require().Equal(1, ends)
+				s.Require().Positive(executionGas)
+				s.Require().Equal(executionGas, response.GasUsed)
+				s.Require().Equal(executionGas, ctx.GasMeter().GasConsumed()-beforeGas)
+				if reject {
+					s.Require().Equal(acceptedGas, executionGas)
+					s.Require().ErrorIs(err, rejection)
+					s.Require().Empty(response.Logs)
+				} else {
+					acceptedGas = executionGas
+					s.Require().NoError(err)
+				}
+				expected := common.Hash{}
+				if !view && !reject {
+					expected = common.BigToHash(big.NewInt(1))
+				}
+				s.Require().Equal(expected, statedb.New(ctx, keeper, statedb.NewEmptyTxConfig()).GetState(recipient, common.Hash{}))
+			})
+		}
+	}
+}

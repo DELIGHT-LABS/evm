@@ -111,7 +111,10 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 
 	res, err := k.ApplyMessage(callCtx, stateDB, msg, tracingHooks, commit, callFromPrecompile, true)
 	if err != nil {
-		return nil, err
+		if res != nil {
+			ctx.GasMeter().ConsumeGas(res.GasUsed, "apply evm message")
+		}
+		return res, err
 	}
 
 	if res.Failed() {
