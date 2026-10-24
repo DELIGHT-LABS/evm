@@ -131,14 +131,14 @@ func TestManagerNestedHooksOmitTransactionBoundary(t *testing.T) {
 	require.Equal(t, 1, enters)
 }
 
-func TestManagerHasActiveFrame(t *testing.T) {
+func TestManagerHasActiveCall(t *testing.T) {
 	manager := New(nil)
-	require.False(t, manager.HasActiveFrame())
+	require.False(t, manager.HasActiveCall())
 
 	manager.Hooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
-	require.True(t, manager.HasActiveFrame())
+	require.True(t, manager.HasActiveCall())
 	manager.Hooks().OnExit(0, nil, 0, nil, false)
-	require.False(t, manager.HasActiveFrame())
+	require.False(t, manager.HasActiveCall())
 }
 
 func TestManagerRemainsActiveAfterSameDepthChildReturns(t *testing.T) {
@@ -156,14 +156,14 @@ func TestManagerRemainsActiveAfterSameDepthChildReturns(t *testing.T) {
 			hooks.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
 			hooks.OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
 			hooks.OnExit(0, nil, 0, tc.err, tc.err != nil)
-			require.True(t, manager.HasActiveFrame(), "the parent precompile is still running")
+			require.True(t, manager.HasActiveCall(), "the parent precompile is still running")
 			hooks.OnExit(0, nil, 0, nil, false)
-			require.False(t, manager.HasActiveFrame())
+			require.False(t, manager.HasActiveCall())
 		})
 	}
 }
 
-func TestManagerRestoresDepthAfterReentrantFrame(t *testing.T) {
+func TestManagerRestoresDepthAfterReentrantCall(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		nestedVM bool
@@ -197,7 +197,7 @@ func TestManagerRestoresDepthAfterReentrantFrame(t *testing.T) {
 			}
 
 			// A precompile reenters its VM at the same reported depth. Installing
-			// and removing a session rebuilds the dispatcher while this frame is open.
+			// and removing a session rebuilds the dispatcher while this call is open.
 			dispatcher.OnEnter(rawDepth, 0, common.Address{}, common.Address{}, nil, 0, nil)
 			uninstall, err := manager.InstallSession(newTestTracer(&tracing.Hooks{
 				OnOpcode: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ []byte, depth int, _ error) {
@@ -209,11 +209,11 @@ func TestManagerRestoresDepthAfterReentrantFrame(t *testing.T) {
 			dispatcher.OnFault(0, 0, 0, 0, nil, rawDepth+1, gethvm.ErrInvalidJump)
 			uninstall()
 			dispatcher.OnExit(rawDepth, nil, 0, gethvm.ErrInvalidJump, true)
-			require.True(t, manager.HasActiveFrame())
+			require.True(t, manager.HasActiveCall())
 			dispatcher.OnOpcode(0, 0, 0, 0, nil, nil, rawDepth+1, nil)
 
 			// Starting another VM after that child failed must use the restored
-			// parent frame, with no residual offset from the previous call.
+			// parent call, with no residual offset from the previous call.
 			manager.NestedHooks().OnEnter(0, 0, common.Address{}, common.Address{}, nil, 0, nil)
 			manager.NestedHooks().OnOpcode(0, 0, 0, 0, nil, nil, 1, nil)
 			manager.NestedHooks().OnExit(0, nil, 0, nil, false)
@@ -222,7 +222,7 @@ func TestManagerRestoresDepthAfterReentrantFrame(t *testing.T) {
 			}
 			root.OnExit(1, nil, 0, nil, false)
 			root.OnExit(0, nil, 0, nil, false)
-			require.False(t, manager.HasActiveFrame())
+			require.False(t, manager.HasActiveCall())
 			require.Equal(t, []int{logicalDepth + 2, logicalDepth + 1, logicalDepth + 2}, opcodes)
 			require.Equal(t, []int{logicalDepth + 2}, faults)
 			require.Equal(t, []int{logicalDepth + 2}, sessionOpcodes)
@@ -237,7 +237,7 @@ func TestManagerRestoresDepthAfterReentrantFrame(t *testing.T) {
 	}
 }
 
-func TestManagerNestedHooksAdjustDepthRelativeToParentFrame(t *testing.T) {
+func TestManagerNestedHooksAdjustDepthRelativeToParentCall(t *testing.T) {
 	var enters, exits, opcodes, faults []int
 	manager := New(&tracing.Hooks{
 		OnEnter: func(depth int, _ byte, _, _ common.Address, _ []byte, _ uint64, _ *big.Int) {

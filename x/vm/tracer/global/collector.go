@@ -15,7 +15,7 @@ import (
 	vmtracer "github.com/cosmos/evm/x/vm/tracer"
 )
 
-// Collector retains attempts, raw facts and current frame outcomes in one
+// Collector retains attempts, raw facts and current call outcomes in one
 // execution journal. Session queries reference these same records.
 type Collector interface {
 	vmtracer.Journal
@@ -24,23 +24,23 @@ type Collector interface {
 
 // txTraceCollector owns the execution journal, including reverted attempts.
 type txTraceCollector struct {
-	events         []vmtracer.Observation
-	frames         map[uint64]*observationFrame
-	stack          []uint64
-	subscribers    []observationSubscriber
-	nextFrame      uint64
-	nextOccurrence uint64
-	nextSubscriber uint64
-	maxEvents      uint64
-	code           func(common.Address) []byte
-	err            error
-	executionErr   error
+	events            []vmtracer.Observation
+	calls             map[uint64]*observationCall
+	stack             []uint64
+	subscribers       []observationSubscriber
+	nextCall          uint64
+	nextObservationID uint64
+	nextSubscriber    uint64
+	maxEvents         uint64
+	code              func(common.Address) []byte
+	err               error
+	executionErr      error
 }
 
-type observationFrame struct {
+type observationCall struct {
 	index  int
 	parent uint64
-	status vmtracer.FrameStatus
+	status vmtracer.CallStatus
 }
 
 type observationSubscriber struct {
@@ -66,7 +66,7 @@ func NewCollectorWithBudget(budget uint64) (Collector, error) {
 		return nil, errors.New("collector requires a positive budget")
 	}
 	return &txTraceCollector{
-		frames:    make(map[uint64]*observationFrame),
+		calls:     make(map[uint64]*observationCall),
 		maxEvents: budget,
 	}, nil
 }
@@ -135,15 +135,15 @@ func (c *txTraceCollector) collectionError(err error) {
 	}
 }
 
-func (c *txTraceCollector) LastOccurrence() uint64 {
+func (c *txTraceCollector) LastObservationID() uint64 {
 	if c == nil {
 		return 0
 	}
 
-	return c.nextOccurrence
+	return c.nextObservationID
 }
 
-// SetCodeReader supplies the current StateDB code at frame entry. Keeper binds
+// SetCodeReader supplies the current StateDB code at call entry. Keeper binds
 // it before execution, including state overrides and EIP-7702 authorizations.
 func (c *txTraceCollector) SetCodeReader(reader func(common.Address) []byte) func() {
 	if c == nil {
@@ -158,15 +158,15 @@ func (c *txTraceCollector) SetCodeReader(reader func(common.Address) []byte) fun
 
 // status combines the local outcome with any enclosing rollback. Attempts
 // remain stored; a later parent revert changes their effective status on read.
-func (c *txTraceCollector) status(id uint64) vmtracer.FrameStatus {
-	f := c.frames[id]
+func (c *txTraceCollector) status(id uint64) vmtracer.CallStatus {
+	f := c.calls[id]
 	if f == nil {
-		return vmtracer.FrameStatus{}
+		return vmtracer.CallStatus{}
 	}
 
 	result := f.status
-	for parent := f.parent; parent != 0; parent = c.frames[parent].parent {
-		if c.frames[parent].status.Reverted {
+	for parent := f.parent; parent != 0; parent = c.calls[parent].parent {
+		if c.calls[parent].status.Reverted {
 			result.Reverted = true
 			result.Success = false
 			break
@@ -176,25 +176,25 @@ func (c *txTraceCollector) status(id uint64) vmtracer.FrameStatus {
 	return result
 }
 
-// CurrentFrame returns the active frame's facts without requiring caller-side
+// CurrentCall returns the active call's facts without requiring caller-side
 // stack reconstruction. It does not infer AA evidence.
-func (c *txTraceCollector) CurrentFrame() (vmtracer.Observation, bool) {
+func (c *txTraceCollector) CurrentCall() (vmtracer.Observation, bool) {
 	if c == nil {
 		return vmtracer.Observation{}, false
 	}
 
-	f := c.frames[c.currentObservationFrame()]
+	f := c.calls[c.currentObservationCall()]
 	if f == nil || f.index >= len(c.events) {
 		return vmtracer.Observation{}, false
 	}
 
 	e := cloneObservation(c.events[f.index])
-	e.Status = c.status(e.FrameID)
+	e.Status = c.status(e.CallID)
 
 	return e, true
 }
 
-// Observe subscribes to the same occurrences stored in the journal. It can be
+// Observe subscribes to the same observations stored in the journal. It can be
 // installed at a precompile boundary; no separate collector or identity exists.
 func (c *txTraceCollector) Observe(fn vmtracer.Observer) (func(), error) {
 	if c == nil || fn == nil {
@@ -232,13 +232,13 @@ func (c *txTraceCollector) Observations() []vmtracer.Observation {
 
 	for i, e := range c.events {
 		out[i] = cloneObservation(e)
-		out[i].Status = c.status(e.FrameID)
+		out[i].Status = c.status(e.CallID)
 	}
 
 	return out
 }
 
-func (c *txTraceCollector) currentObservationFrame() uint64 {
+func (c *txTraceCollector) currentObservationCall() uint64 {
 	if c != nil {
 		for _, v := range slices.Backward(c.stack) {
 			if v != 0 {
@@ -255,27 +255,27 @@ func (c *txTraceCollector) emitObservation(e vmtracer.Observation) {
 		return
 	}
 
-	c.nextOccurrence++
+	c.nextObservationID++
 	if uint64(len(c.events)) >= c.maxEvents {
 		c.collectionError(errors.New("raw observation budget exceeded"))
 		return
 	}
 
-	e.OccurrenceID = c.nextOccurrence
-	if e.FrameID == 0 {
-		e.FrameID = c.currentObservationFrame()
+	e.ObservationID = c.nextObservationID
+	if e.CallID == 0 {
+		e.CallID = c.currentObservationCall()
 	}
 
-	if f := c.frames[e.FrameID]; f != nil && f.index < len(c.events) {
+	if f := c.calls[e.CallID]; f != nil && f.index < len(c.events) {
 		enter := c.events[f.index]
-		e.ParentFrameID = f.parent
+		e.ParentCallID = f.parent
 		e.Depth = enter.Depth
 		e.ExecutionAddress = enter.ExecutionAddress
 		e.CodeAddress = enter.CodeAddress
 		e.CodeAddressKnown = enter.CodeAddressKnown
 	}
 
-	e.Status = c.status(e.FrameID)
+	e.Status = c.status(e.CallID)
 	e = cloneObservation(e)
 	c.events = append(c.events, e)
 	subscribers := append([]observationSubscriber(nil), c.subscribers...)
@@ -290,12 +290,12 @@ func (c *txTraceCollector) onEnter(depth int, typ byte, from, to common.Address,
 		return
 	}
 
-	// geth's SELFDESTRUCT enter/exit pair is synthetic, not a call frame.
-	// Attribute the executed movement to the still-active enclosing frame so the
+	// geth's SELFDESTRUCT enter/exit pair is synthetic, not a call.
+	// Attribute the executed movement to the still-active enclosing call so the
 	// exported call tree contains only CALL/CREATE-family entries.
 	if typ == byte(vm.SELFDESTRUCT) {
-		if c.currentObservationFrame() == 0 {
-			c.collectionError(errors.New("selfdestruct outside recorded call frame"))
+		if c.currentObservationCall() == 0 {
+			c.collectionError(errors.New("selfdestruct outside recorded call"))
 		}
 
 		if from != to && value != nil && value.Sign() > 0 {
@@ -312,14 +312,14 @@ func (c *txTraceCollector) onEnter(depth int, typ byte, from, to common.Address,
 		return
 	}
 
-	parent := c.currentObservationFrame()
-	c.nextFrame++
+	parent := c.currentObservationCall()
+	c.nextCall++
 	e := vmtracer.Observation{
-		OccurrenceID:     c.nextOccurrence + 1,
+		ObservationID:    c.nextObservationID + 1,
 		Kind:             vmtracer.CallEnter,
 		Depth:            depth,
-		FrameID:          c.nextFrame,
-		ParentFrameID:    parent,
+		CallID:           c.nextCall,
+		ParentCallID:     parent,
 		Opcode:           typ,
 		Caller:           from,
 		Target:           to,
@@ -345,14 +345,14 @@ func (c *txTraceCollector) onEnter(depth int, typ byte, from, to common.Address,
 		}
 
 	default:
-		c.collectionError(errors.New("code reader unavailable at frame entry"))
+		c.collectionError(errors.New("code reader unavailable at call entry"))
 	}
 
-	c.frames[e.FrameID] = &observationFrame{
+	c.calls[e.CallID] = &observationCall{
 		index:  len(c.events),
 		parent: parent,
 	}
-	c.stack = append(c.stack, e.FrameID)
+	c.stack = append(c.stack, e.CallID)
 	c.emitObservation(e)
 
 	if typ == byte(vm.CALL) && len(input) >= 4 && (bytes.Equal(input[:4], erc20TransferSelector) || bytes.Equal(input[:4], erc20TransferFromSelector)) {
@@ -376,14 +376,14 @@ func (c *txTraceCollector) onExit(_ int, output []byte, gas uint64, err error, r
 		return
 	}
 
-	id := c.currentObservationFrame()
+	id := c.currentObservationCall()
 	if id == 0 {
-		c.collectionError(errors.New("call exit without frame"))
+		c.collectionError(errors.New("call exit without call"))
 		return
 	}
 
-	f := c.frames[id]
-	f.status = vmtracer.FrameStatus{
+	f := c.calls[id]
+	f.status = vmtracer.CallStatus{
 		Exited:   true,
 		Success:  err == nil && !reverted,
 		Reverted: reverted,
@@ -392,7 +392,7 @@ func (c *txTraceCollector) onExit(_ int, output []byte, gas uint64, err error, r
 
 	c.emitObservation(vmtracer.Observation{
 		Kind:     vmtracer.CallExit,
-		FrameID:  id,
+		CallID:   id,
 		Output:   output,
 		Gas:      gas,
 		Err:      err,
@@ -409,10 +409,10 @@ func (c *txTraceCollector) RecordNativeTransfer(from, to common.Address, value *
 		return
 	}
 
-	id := c.currentObservationFrame()
-	f := c.frames[id]
+	id := c.currentObservationCall()
+	f := c.calls[id]
 	if f == nil || f.index >= len(c.events) {
-		c.collectionError(errors.New("movement outside recorded frame"))
+		c.collectionError(errors.New("movement outside recorded call"))
 		return
 	}
 

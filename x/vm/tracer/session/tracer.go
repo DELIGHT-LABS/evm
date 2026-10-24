@@ -39,17 +39,17 @@ func Install(ctx sdk.Context, tracer *Tracer) (cleanup func(), err error) {
 	return manager.InstallSession(tracer)
 }
 
-// Range is a view into the global journal. Closing fixes its occurrence range;
+// Range is a view into the global journal. Closing fixes its observation range;
 // later ancestor rollback is reflected by subsequent reads.
 type Range struct {
 	journal vmtracer.Journal
-	FrameID uint64
+	CallID  uint64
 	Start   uint64
 	end     uint64
 	closed  bool
 }
 
-// Begin references the active frame and subsequent occurrences in the existing
+// Begin references the active call and subsequent observations in the existing
 // execution journal. It does not create a collector or install callbacks.
 func Begin(ctx sdk.Context) (*Range, error) {
 	manager, ok := vmtracer.FromContext(ctx)
@@ -60,20 +60,20 @@ func Begin(ctx sdk.Context) (*Range, error) {
 	if journal == nil {
 		return nil, errors.New("session requires an execution journal")
 	}
-	frame, ok := journal.CurrentFrame()
-	if !manager.HasActiveFrame() || !ok {
-		return nil, errors.New("session requires an active execution frame")
+	call, ok := journal.CurrentCall()
+	if !manager.HasActiveCall() || !ok {
+		return nil, errors.New("session requires an active execution call")
 	}
 	return &Range{
 		journal: journal,
-		FrameID: frame.FrameID,
-		Start:   journal.LastOccurrence() + 1,
+		CallID:  call.CallID,
+		Start:   journal.LastObservationID() + 1,
 	}, nil
 }
 
 func (r *Range) Close() {
 	if r != nil && !r.closed {
-		r.end = r.journal.LastOccurrence() + 1
+		r.end = r.journal.LastObservationID() + 1
 		r.closed = true
 	}
 }
@@ -84,11 +84,11 @@ func (r *Range) Observations() []vmtracer.Observation {
 	}
 	end := r.end
 	if !r.closed {
-		end = r.journal.LastOccurrence() + 1
+		end = r.journal.LastObservationID() + 1
 	}
 	var out []vmtracer.Observation
 	for _, e := range r.journal.Observations() {
-		if e.OccurrenceID >= r.Start && e.OccurrenceID < end {
+		if e.ObservationID >= r.Start && e.ObservationID < end {
 			out = append(out, e)
 		}
 	}

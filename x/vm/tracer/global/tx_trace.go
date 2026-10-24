@@ -33,7 +33,7 @@ func WithCollector(ctx sdk.Context, txIndex uint64, collector Collector) sdk.Con
 }
 
 // GetTxTrace returns the ordered journal and latched error for txIndex.
-// The error must be checked even when an EVM frame caught a child revert.
+// The error must be checked even when an EVM call caught a child revert.
 func GetTxTrace(ctx sdk.Context, txIndex uint64) ([]vmtracer.Observation, error) {
 	trace, ok := ctx.Value(txTraceContextKey{}).(txTraceContext)
 	if !ok || trace.txIndex != txIndex || trace.collector == nil {

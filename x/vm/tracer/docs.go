@@ -89,7 +89,7 @@
 // must deliberately reuse the active enclosing manager and pass NestedHooks(),
 // which suppresses duplicate transaction-boundary events. Do not infer activity
 // solely from FromContext succeeding: a completed manager can remain in StateDB.
-// Use HasActiveFrame to distinguish an active parent from a sequential call.
+// Use HasActiveCall to distinguish an active parent from a sequential call.
 // NewEVM callers also own transaction-boundary hook dispatch; constructing the
 // VM alone does not emit OnTxStart or OnTxEnd.
 //
@@ -100,7 +100,7 @@
 //	observations, err := vmglobaltracer.GetTxTrace(ctx, uint64(receipt.TransactionIndex))
 //
 // Call enter/exit, native transfers, token-call requests and raw logs share one
-// occurrence sequence. Reverted attempts remain present. ERC20 request records
+// observation sequence. Reverted attempts remain present. ERC20 request records
 // have separate IDs, as required by the consumer's raw observation contract;
 // calldata and logs are not decoded into token movements by the collector.
 // Balance-change records are additional diagnostics, not guessed transfers.

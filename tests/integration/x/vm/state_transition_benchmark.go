@@ -315,7 +315,7 @@ func BenchmarkApplyMessage(b *testing.B, create network.CreateEvmApp) {
 
 		require.NoError(b, err)
 		require.False(b, resp.Failed())
-		require.False(b, manager.HasActiveFrame())
+		require.False(b, manager.HasActiveCall())
 		trace, traceErr := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
 		require.NoError(b, traceErr)
 		require.NotEmpty(b, trace)
@@ -366,7 +366,7 @@ func BenchmarkApplyMessageWithLegacyTx(b *testing.B, create network.CreateEvmApp
 
 		require.NoError(b, err)
 		require.False(b, resp.Failed())
-		require.False(b, manager.HasActiveFrame())
+		require.False(b, manager.HasActiveCall())
 		trace, traceErr := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
 		require.NoError(b, traceErr)
 		require.NotEmpty(b, trace)
@@ -418,7 +418,7 @@ func BenchmarkApplyMessageWithDynamicFeeTx(b *testing.B, create network.CreateEv
 
 		require.NoError(b, err)
 		require.False(b, resp.Failed())
-		require.False(b, manager.HasActiveFrame())
+		require.False(b, manager.HasActiveCall())
 		trace, traceErr := vmglobaltracer.GetTxTrace(ctx, uint64(txConfig.TxIndex))
 		require.NoError(b, traceErr)
 		require.NotEmpty(b, trace)
