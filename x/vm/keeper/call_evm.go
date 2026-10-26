@@ -46,10 +46,13 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 	}
 
 	gasLimit := config.DefaultGasCap
-	// Cap the gas limit of this internal EVM call by the gas remaining on the
-	// transaction's Cosmos gas meter.
-	if remaining := ctx.GasMeter().GasRemaining(); remaining < gasLimit {
-		gasLimit = remaining
+	if gasCap != nil && gasCap.Sign() > 0 {
+		if gasCap.BitLen() <= 64 {
+			provided := gasCap.Uint64()
+			if provided < gasLimit {
+				gasLimit = provided
+			}
+		}
 	}
 
 	msg := core.Message{
@@ -64,6 +67,9 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 		Data:       data,
 		AccessList: ethtypes.AccessList{},
 	}
+
+	// Bound this internal EVM call by the remaining Cosmos transaction gas.
+	msg.GasLimit = min(msg.GasLimit, ctx.GasMeter().GasRemaining())
 
 	res, err := k.ApplyMessage(ctx, stateDB, msg, nil, commit, callFromPrecompile, true)
 	if err != nil {

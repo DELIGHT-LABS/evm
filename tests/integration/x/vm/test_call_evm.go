@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -245,32 +246,53 @@ func (s *KeeperTestSuite) TestCallEVMWithData() {
 }
 
 func (s *KeeperTestSuite) TestCallEVMWithDataGasBoundedByTxGasMeter() {
-	s.SetupTest() // reset
-
-	deployer := common.BytesToAddress([]byte("vm-test-deployer"))
-	ctx := s.Network.GetContext()
-	ak := s.Network.App.GetAccountKeeper()
-	accAddr := sdk.AccAddress(deployer.Bytes())
-	if ak.GetAccount(ctx, accAddr) == nil {
-		ak.SetAccount(ctx, ak.NewAccountWithAddress(ctx, accAddr))
+	testCases := []struct {
+		name   string
+		txGas  uint64
+		gasCap *big.Int
+	}{
+		{
+			name:  "no caller gas cap",
+			txGas: 100_000,
+		},
+		{
+			name:   "transaction gas below caller gas cap",
+			txGas:  100_000,
+			gasCap: big.NewInt(1_000_000),
+		},
+		{
+			name:   "caller gas cap below transaction gas",
+			txGas:  1_000_000,
+			gasCap: big.NewInt(100_000),
+		},
 	}
 
-	ctorArgs, err := contracts.ERC20MinterBurnerDecimalsContract.ABI.Pack("", "test", "test", uint8(18))
-	s.Require().NoError(err)
-	data := append(contracts.ERC20MinterBurnerDecimalsContract.Bin, ctorArgs...) //nolint:gocritic
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			s.SetupTest() // reset
 
-	// The tx's gas meter holds far less gas than deploying this contract
-	// requires, so the bounded internal call must fail the intrinsic gas
-	// check instead of executing the deployment with the default gas cap.
-	gasMeter := storetypes.NewGasMeter(100_000)
-	txCtx := ctx.WithGasMeter(gasMeter)
-	stateDB := statedb.New(txCtx, s.Network.App.GetEVMKeeper(), statedb.NewEmptyTxConfig())
+			deployer := common.BytesToAddress([]byte("vm-test-deployer"))
+			ctx := s.Network.GetContext()
+			ak := s.Network.App.GetAccountKeeper()
+			accAddr := sdk.AccAddress(deployer.Bytes())
+			if ak.GetAccount(ctx, accAddr) == nil {
+				ak.SetAccount(ctx, ak.NewAccountWithAddress(ctx, accAddr))
+			}
 
-	_, err = s.Network.App.GetEVMKeeper().CallEVMWithData(txCtx, stateDB, deployer, nil, data, true, false, nil)
-	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "intrinsic gas")
+			ctorArgs, err := contracts.ERC20MinterBurnerDecimalsContract.ABI.Pack("", "test", "test", uint8(18))
+			s.Require().NoError(err)
+			data := append(contracts.ERC20MinterBurnerDecimalsContract.Bin, ctorArgs...) //nolint:gocritic
 
-	// The tx gas meter is never exceeded, i.e. the EVM was not able to
-	// perform more gas than the tx paid for.
-	s.Require().False(gasMeter.IsPastLimit())
+			// The smaller gas limit cannot cover the deployment's intrinsic gas.
+			gasMeter := storetypes.NewGasMeter(tc.txGas)
+			txCtx := ctx.WithGasMeter(gasMeter)
+			stateDB := statedb.New(txCtx, s.Network.App.GetEVMKeeper(), statedb.NewEmptyTxConfig())
+
+			_, err = s.Network.App.GetEVMKeeper().CallEVMWithData(txCtx, stateDB, deployer, nil, data, true, false, tc.gasCap)
+			s.Require().Error(err)
+			s.Require().Contains(err.Error(), "intrinsic gas")
+
+			s.Require().False(gasMeter.IsPastLimit())
+		})
+	}
 }
