@@ -13,6 +13,8 @@ import (
 	"github.com/cosmos/evm/x/vm/statedb"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 
+	storetypes "cosmossdk.io/store/types"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
@@ -266,6 +268,58 @@ func (s *KeeperTestSuite) TestCallEVMWithData() {
 					s.Require().Contains(err.Error(), tc.expError)
 				}
 			}
+		})
+	}
+}
+
+func (s *KeeperTestSuite) TestCallEVMWithDataGasBoundedByTxGasMeter() {
+	testCases := []struct {
+		name   string
+		txGas  uint64
+		gasCap *big.Int
+	}{
+		{
+			name:  "no caller gas cap",
+			txGas: 100_000,
+		},
+		{
+			name:   "transaction gas below caller gas cap",
+			txGas:  100_000,
+			gasCap: big.NewInt(1_000_000),
+		},
+		{
+			name:   "caller gas cap below transaction gas",
+			txGas:  1_000_000,
+			gasCap: big.NewInt(100_000),
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			s.SetupTest() // reset
+
+			deployer := common.BytesToAddress([]byte("vm-test-deployer"))
+			ctx := s.Network.GetContext()
+			ak := s.Network.App.GetAccountKeeper()
+			accAddr := sdk.AccAddress(deployer.Bytes())
+			if ak.GetAccount(ctx, accAddr) == nil {
+				ak.SetAccount(ctx, ak.NewAccountWithAddress(ctx, accAddr))
+			}
+
+			ctorArgs, err := contracts.ERC20MinterBurnerDecimalsContract.ABI.Pack("", "test", "test", uint8(18))
+			s.Require().NoError(err)
+			data := append(contracts.ERC20MinterBurnerDecimalsContract.Bin, ctorArgs...) //nolint:gocritic
+
+			// The smaller gas limit cannot cover the deployment's intrinsic gas.
+			gasMeter := storetypes.NewGasMeter(tc.txGas)
+			txCtx := ctx.WithGasMeter(gasMeter)
+			stateDB := statedb.New(txCtx, s.Network.App.GetEVMKeeper(), statedb.NewEmptyTxConfig())
+
+			_, err = s.Network.App.GetEVMKeeper().CallEVMWithData(txCtx, stateDB, deployer, nil, data, true, false, tc.gasCap)
+			s.Require().Error(err)
+			s.Require().Contains(err.Error(), "intrinsic gas")
+
+			s.Require().False(gasMeter.IsPastLimit())
 		})
 	}
 }

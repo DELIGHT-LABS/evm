@@ -68,6 +68,9 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 		AccessList: ethtypes.AccessList{},
 	}
 
+	// Bound this internal EVM call by the remaining Cosmos transaction gas.
+	msg.GasLimit = min(msg.GasLimit, ctx.GasMeter().GasRemaining())
+
 	res, err := k.ApplyMessage(ctx, stateDB, msg, nil, commit, callFromPrecompile, true)
 	if err != nil {
 		return nil, err
