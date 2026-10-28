@@ -51,6 +51,8 @@ func (s *KeeperTestSuite) SetupTest() {
 
 // setupTest also accepts testing.B so benchmarks can use the same app setup
 // without relying on testify's testing.T-only suite lifecycle.
+//
+//nolint:unparam
 func (s *KeeperTestSuite) setupTest(t require.TestingT) {
 	keys := keyring.New(2)
 	// Set custom balance based on test params

@@ -854,12 +854,13 @@ func (s *KeeperTestSuite) TestCollectorEnforcementCoverageAndFinalization() {
 			s.Require().NoError(err)
 			response, err := keeper.ApplyTransaction(ctx.WithGasMeter(storetypes.NewGasMeter(1_000_000)), tx.GetMsgs()[0].(*evmtypes.MsgEthereumTx).AsTransaction())
 			s.Require().Equal(1, ended)
-			if mode == "budget" {
+			switch mode {
+			case "budget":
 				s.Require().ErrorContains(err, "budget")
 				s.Require().False(observed)
-			} else if mode == "observer" || mode == "txend-reject" {
+			case "observer", "txend-reject":
 				s.Require().ErrorIs(err, rejection)
-			} else {
+			default:
 				s.Require().NoError(err)
 				s.Require().False(response.Failed())
 			}
