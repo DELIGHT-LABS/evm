@@ -16,6 +16,7 @@ import (
 	evmtrace "github.com/cosmos/evm/trace"
 	evmante "github.com/cosmos/evm/x/vm/ante"
 	"github.com/cosmos/evm/x/vm/statedb"
+	vmtracer "github.com/cosmos/evm/x/vm/tracer"
 	"github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
@@ -96,6 +97,8 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 		Data:       data,
 		AccessList: ethtypes.AccessList{},
 	}
+	txConfig := statedb.NewEmptyTxConfig()
+	callCtx, tracingHooks := k.prepareCallEVMTracing(callCtx, stateDB, msg, txConfig, commit)
 
 	if stateDB != nil && !callFromPrecompile {
 		stateCtx := stateDB.GetContext()
@@ -106,9 +109,12 @@ func (k Keeper) CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from 
 		}
 	}
 
-	res, err := k.ApplyMessage(callCtx, stateDB, msg, nil, commit, callFromPrecompile, true)
+	res, err := k.ApplyMessage(callCtx, stateDB, msg, tracingHooks, commit, callFromPrecompile, true)
 	if err != nil {
-		return nil, err
+		if res != nil {
+			ctx.GasMeter().ConsumeGas(res.GasUsed, "apply evm message")
+		}
+		return res, err
 	}
 
 	if res.Failed() {
@@ -136,7 +142,7 @@ func (k *Keeper) CallEVMViewWithData(ctx sdk.Context, from common.Address, contr
 	}
 	limitedByParent := effectiveGasCap.IsUint64() && effectiveGasCap.Uint64() == remainingGas
 
-	execCtx := buildTraceCtx(ctx, remainingGas)
+	execCtx := vmtracer.WithoutManager(buildTraceCtx(ctx, remainingGas))
 	stateDB := statedb.New(execCtx, k, statedb.NewEmptyTxConfig())
 
 	res, err := k.CallEVMWithData(execCtx, stateDB, from, contract, data, false, false, effectiveGasCap)

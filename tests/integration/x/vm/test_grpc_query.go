@@ -33,6 +33,8 @@ import (
 	"github.com/cosmos/evm/x/vm/keeper"
 	"github.com/cosmos/evm/x/vm/keeper/testdata"
 	"github.com/cosmos/evm/x/vm/statedb"
+	vmtracer "github.com/cosmos/evm/x/vm/tracer"
+	vmglobaltracer "github.com/cosmos/evm/x/vm/tracer/global"
 	"github.com/cosmos/evm/x/vm/types"
 
 	sdkmath "cosmossdk.io/math"
@@ -668,7 +670,10 @@ func (s *KeeperTestSuite) TestEstimateGas() {
 		{
 			"gas exceed allowance",
 			func() types.TransactionArgs {
-				return types.TransactionArgs{To: &common.Address{}, Gas: &gasHelper}
+				return types.TransactionArgs{
+					To:  &common.Address{},
+					Gas: &gasHelper,
+				}
 			},
 			true,
 			ethparams.TxGas,
@@ -780,7 +785,10 @@ func (s *KeeperTestSuite) TestEstimateGas() {
 		{
 			"gas exceed allowance w/ EnableFeemarket",
 			func() types.TransactionArgs {
-				return types.TransactionArgs{To: &common.Address{}, Gas: &gasHelper}
+				return types.TransactionArgs{
+					To:  &common.Address{},
+					Gas: &gasHelper,
+				}
 			},
 			true,
 			ethparams.TxGas,
@@ -1171,7 +1179,8 @@ func (s *KeeperTestSuite) TestEstimateGasTxTraceIndexMatchesApply() {
 	s.SetupTest()
 
 	evmKeeper := s.Network.App.GetEVMKeeper()
-	hook := &txTraceByReceiptIndexHook{keeper: evmKeeper}
+	evmKeeper.SetGlobalTracerFactories(vmglobaltracer.TxTraceFactory)
+	hook := &txTraceByReceiptIndexHook{}
 	evmKeeper.SetHooks(keeper.NewMultiEvmHooks(hook))
 
 	sender := s.Keyring.GetAddr(0)
@@ -1811,6 +1820,7 @@ func (s *KeeperTestSuite) TestEstimateGasCandidateStateIsDiscardedAndHooksSeePos
 	sender := s.Keyring.GetAddr(0)
 	recipient := s.Keyring.GetAddr(1)
 	evmKeeper := s.Network.App.GetEVMKeeper()
+	evmKeeper.SetGlobalTracerFactories(vmglobaltracer.TxTraceFactory)
 	recipientBefore := new(uint256.Int).Set(evmKeeper.GetBalance(s.Network.GetContext(), recipient))
 	moduleAddr := s.Network.App.GetAccountKeeper().GetModuleAddress(types.ModuleName)
 
@@ -1822,8 +1832,11 @@ func (s *KeeperTestSuite) TestEstimateGasCandidateStateIsDiscardedAndHooksSeePos
 				sawPostState = sawPostState || evmKeeper.GetBalance(ctx, recipient).Cmp(recipientBefore) > 0
 			}
 			if len(msg.Data) > 0 {
-				touches, _ := evmKeeper.GetTxTrace(ctx, 0)
-				sawTrace = sawTrace || len(touches) > 0
+				trace, traceErr := vmglobaltracer.GetTxTrace(ctx, 0)
+				if traceErr != nil {
+					return traceErr
+				}
+				sawTrace = sawTrace || len(trace) > 0
 			}
 			beforeMint := s.Network.App.GetBankKeeper().GetBalance(ctx, moduleAddr, mintedDenom)
 			sawCleanCandidate = sawCleanCandidate && beforeMint.IsZero()
@@ -1879,9 +1892,6 @@ func (s *KeeperTestSuite) TestEstimateGasCandidateStateIsDiscardedAndHooksSeePos
 	s.Require().True(sawTrace, "hook must see the candidate tx trace")
 	s.Require().True(sawCleanCandidate, "each probe must start without prior hook state")
 	s.Require().True(s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), moduleAddr, mintedDenom).IsZero())
-	touches, transfers := evmKeeper.GetTxTrace(s.Network.GetContext(), 0)
-	s.Require().Empty(touches)
-	s.Require().Empty(transfers)
 	s.Require().Equal(recipientBefore, evmKeeper.GetBalance(s.Network.GetContext(), recipient))
 }
 
@@ -3178,7 +3188,10 @@ func (s *KeeperTestSuite) TestEthCall() {
 		{
 			"invalid args",
 			func() *types.EthCallRequest {
-				return &types.EthCallRequest{Args: []byte("invalid args"), GasCap: config.DefaultGasCap}
+				return &types.EthCallRequest{
+					Args:   []byte("invalid args"),
+					GasCap: config.DefaultGasCap,
+				}
 			},
 			false,
 		},
@@ -3194,7 +3207,10 @@ func (s *KeeperTestSuite) TestEthCall() {
 				})
 				s.Require().NoError(err)
 
-				return &types.EthCallRequest{Args: args, GasCap: config.DefaultGasCap}
+				return &types.EthCallRequest{
+					Args:   args,
+					GasCap: config.DefaultGasCap,
+				}
 			},
 			false,
 		},
@@ -3207,7 +3223,10 @@ func (s *KeeperTestSuite) TestEthCall() {
 				})
 
 				s.Require().NoError(err)
-				req := &types.EthCallRequest{Args: args, GasCap: config.DefaultGasCap}
+				req := &types.EthCallRequest{
+					Args:   args,
+					GasCap: config.DefaultGasCap,
+				}
 
 				params := s.Network.App.GetEVMKeeper().GetParams(s.Network.GetContext())
 				params.AccessControl = types.AccessControl{
@@ -3230,7 +3249,10 @@ func (s *KeeperTestSuite) TestEthCall() {
 				})
 
 				s.Require().NoError(err)
-				req := &types.EthCallRequest{Args: args, GasCap: config.DefaultGasCap}
+				req := &types.EthCallRequest{
+					Args:   args,
+					GasCap: config.DefaultGasCap,
+				}
 
 				params := s.Network.App.GetEVMKeeper().GetParams(s.Network.GetContext())
 				params.AccessControl = types.AccessControl{
@@ -3263,6 +3285,38 @@ func (s *KeeperTestSuite) TestEthCall() {
 			s.Require().NoError(err)
 		})
 	}
+}
+
+func (s *KeeperTestSuite) TestEthCallInstallsApplicationTracer() {
+	s.SetupTest()
+
+	evmKeeper := s.Network.App.GetEVMKeeper()
+	var collector vmglobaltracer.Collector
+	evmKeeper.SetGlobalTracerFactories(func(ctx sdk.Context, execution vmtracer.ExecutionInfo) (sdk.Context, vmtracer.Tracer) {
+		s.Require().False(execution.Commit)
+		_, ok := vmtracer.FromContext(ctx)
+		s.Require().True(ok)
+		collector = vmglobaltracer.NewCollector()
+		return ctx, collector
+	})
+
+	sender := s.Keyring.GetAddr(0)
+	recipient := s.Keyring.GetAddr(1)
+	args, err := json.Marshal(types.TransactionArgs{
+		From: &sender,
+		To:   &recipient,
+	})
+	s.Require().NoError(err)
+
+	res, err := s.Network.GetEvmClient().EthCall(s.Network.GetContext(), &types.EthCallRequest{
+		Args:            args,
+		GasCap:          config.DefaultGasCap,
+		ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
+	})
+	s.Require().NoError(err)
+	s.Require().False(res.Failed())
+	s.Require().NotNil(collector)
+	s.Require().NotEmpty(collector.Observations())
 }
 
 func (s *KeeperTestSuite) TestBalance() {
