@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/tracing"
+	"github.com/holiman/uint256"
 
 	"github.com/cosmos/evm/x/vm/statedb"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
@@ -51,6 +52,7 @@ type EVMKeeper interface {
 	SetCode(ctx sdk.Context, hash []byte, bytecode []byte)
 	SetAccount(ctx sdk.Context, address common.Address, account statedb.Account) error
 	GetAccount(ctx sdk.Context, address common.Address) *statedb.Account
+	GetBalance(ctx sdk.Context, addr common.Address) *uint256.Int
 	IsContract(ctx sdk.Context, address common.Address) bool
 	GetState(ctx sdk.Context, addr common.Address, key common.Hash) common.Hash
 	GetCodeHash(ctx sdk.Context, addr common.Address) common.Hash

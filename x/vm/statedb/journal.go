@@ -22,8 +22,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
-
-	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 // JournalEntry is a modification entry in the state change journal that can be
@@ -144,9 +142,10 @@ type (
 		slot    *common.Hash
 	}
 	precompileCallChange struct {
-		snapshot                int
-		prevEvents              sdk.Events
-		prevProcessedEventCount int
+		checkpoint *nativeCheckpoint
+	}
+	cacheObjectChange struct {
+		account common.Address
 	}
 	createContractChange struct {
 		account *common.Address
@@ -179,20 +178,20 @@ func (ch createContractChange) Dirtied() *common.Address {
 }
 
 func (pc precompileCallChange) Revert(s *StateDB) {
-	// rollback multi store from cache ctx to the previous
-	// state stored in the snapshot
-	s.RevertMultiStore(pc.snapshot)
-
-	// Restore events to the state before this precompile call
-	s.cacheCtx.EventManager().OverrideEvents(pc.prevEvents)
-
-	// Restore processed events counter
-	s.processedEventsCount = pc.prevProcessedEventCount
+	pc.checkpoint.revert()
 
 	// NOTE: the precompile calls counter is deliberately NOT restored,
 	// so reverted precompile calls still consume the call limit. Restoring
 	// it would let a contract issue an unbounded number of reverting
 	// precompile calls within a single transaction.
+}
+
+func (ch cacheObjectChange) Revert(s *StateDB) {
+	delete(s.stateObjects, ch.account)
+}
+
+func (ch cacheObjectChange) Dirtied() *common.Address {
+	return nil
 }
 
 func (pc precompileCallChange) Dirtied() *common.Address {

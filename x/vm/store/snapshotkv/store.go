@@ -5,7 +5,6 @@ import (
 
 	"github.com/cosmos/evm/x/vm/store/types"
 
-	"cosmossdk.io/store/cachekv"
 	storetypes "cosmossdk.io/store/types"
 )
 
@@ -42,22 +41,18 @@ func (cs *Store) CurrentStore() storetypes.CacheKVStore {
 // Commit commits all the cached stores from top to bottom in order
 // and clears the cache stack by setting an empty slice of cache store.
 func (cs *Store) Commit() {
-	cs.Flush()
-	cs.cacheStores = nil
-}
-
-// Flush flushes all pending changes in the current store layer
-func (cs *Store) Flush() {
+	// commit in order from top to bottom
 	for i := len(cs.cacheStores) - 1; i >= 0; i-- {
 		cs.cacheStores[i].Write()
 	}
 	cs.initialStore.Write()
+	cs.cacheStores = nil
 }
 
 // Snapshot pushes a new cached store to the stack,
 // and returns the index of it.
 func (cs *Store) Snapshot() int {
-	cs.cacheStores = append(cs.cacheStores, cachekv.NewStore(cs.CurrentStore()))
+	cs.cacheStores = append(cs.cacheStores, NewCache(cs.CurrentStore()))
 	return len(cs.cacheStores) - 1
 }
 

@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/holiman/uint256"
 
 	"github.com/cosmos/evm/x/vm/statedb"
 	"github.com/cosmos/evm/x/vm/types"
@@ -47,6 +48,23 @@ func (k MockKeeper) GetAccount(_ sdk.Context, addr common.Address) *statedb.Acco
 		return nil
 	}
 	return &acct.account
+}
+
+func (k MockKeeper) GetBalance(ctx sdk.Context, addr common.Address) *uint256.Int {
+	total := new(big.Int)
+	if account := k.GetAccount(ctx, addr); account != nil {
+		if account.Balance != nil {
+			total.Set(account.Balance.ToBig())
+		}
+		if locked := account.LockedBalanceSnapshot(); locked != nil {
+			total.Add(total, locked)
+		}
+	}
+	value, overflow := uint256.FromBig(total)
+	if overflow {
+		return nil
+	}
+	return value
 }
 
 func (k MockKeeper) GetState(_ sdk.Context, addr common.Address, key common.Hash) common.Hash {

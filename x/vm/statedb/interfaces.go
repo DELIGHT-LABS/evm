@@ -3,6 +3,7 @@ package statedb
 import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/holiman/uint256"
 
 	storetypes "cosmossdk.io/store/types"
 
@@ -23,6 +24,9 @@ type ExtStateDB interface {
 type Keeper interface {
 	// Read methods
 	GetAccount(ctx sdk.Context, addr common.Address) *Account
+	// GetBalance returns the full native balance in EVM precision, including
+	// locked and fractional amounts. A nil balance indicates overflow.
+	GetBalance(ctx sdk.Context, addr common.Address) *uint256.Int
 	GetState(ctx sdk.Context, addr common.Address, key common.Hash) common.Hash
 	GetCode(ctx sdk.Context, codeHash common.Hash) []byte
 	GetCodeHash(ctx sdk.Context, addr common.Address) common.Hash

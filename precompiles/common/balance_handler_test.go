@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -195,7 +194,8 @@ func TestAfterBalanceChange(t *testing.T) {
 	tKey := storetypes.NewTransientStoreKey("test_t")
 	ctx := sdktestutil.DefaultContext(storeKey, tKey)
 
-	stateDB := statedb.New(ctx, mocks.NewEVMKeeper(), statedb.NewEmptyTxConfig())
+	keeper := mocks.NewEVMKeeper()
+	stateDB := statedb.New(ctx, keeper, statedb.NewEmptyTxConfig())
 
 	_, addrs, err := testutil.GeneratePrivKeyAddressPairs(2)
 	require.NoError(t, err)
@@ -205,7 +205,9 @@ func TestAfterBalanceChange(t *testing.T) {
 	receiver := common.BytesToAddress(receiverAcc)
 
 	// initial balance for spender
-	stateDB.AddBalance(spender, uint256.NewInt(5), tracing.BalanceChangeUnspecified)
+	require.NoError(t, keeper.SetAccount(ctx, spender, statedb.Account{Balance: uint256.NewInt(5)}))
+	require.Equal(t, uint256.NewInt(5), stateDB.GetBalance(spender))
+	require.True(t, stateDB.GetBalance(receiver).IsZero())
 
 	bankKeeper := cmnmocks.NewBankKeeper(t)
 	precisebankModuleAccAddr := authtypes.NewModuleAddress(precisebanktypes.ModuleName)
@@ -219,6 +221,8 @@ func TestAfterBalanceChange(t *testing.T) {
 	bh := bhf.NewBalanceHandler()
 	bh.BeforeBalanceChange(ctx)
 
+	require.NoError(t, keeper.SetAccount(ctx, spender, statedb.Account{Balance: uint256.NewInt(2)}))
+	require.NoError(t, keeper.SetAccount(ctx, receiver, statedb.Account{Balance: uint256.NewInt(3)}))
 	coins := sdk.NewCoins(sdk.NewInt64Coin(evmtypes.GetEVMCoinDenom(), 3))
 	ctx.EventManager().EmitEvents(sdk.Events{
 		banktypes.NewCoinSpentEvent(spenderAcc, coins),
@@ -244,9 +248,9 @@ func TestAfterBalanceChangeFractionalEvents(t *testing.T) {
 		delta      int64
 		expBalance string
 	}{
-		{name: "positive delta", delta: 3, expBalance: "11"},
-		{name: "negative delta", delta: -3, expBalance: "5"},
-		{name: "zero delta", delta: 0, expBalance: "8"},
+		{name: "positive delta", delta: 3, expBalance: "8"},
+		{name: "negative delta", delta: -3, expBalance: "2"},
+		{name: "zero delta", delta: 0, expBalance: "5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setupBalanceHandlerTest(t)
@@ -254,13 +258,15 @@ func TestAfterBalanceChangeFractionalEvents(t *testing.T) {
 			storeKey := storetypes.NewKVStoreKey("test")
 			tKey := storetypes.NewTransientStoreKey("test_t")
 			ctx := sdktestutil.DefaultContext(storeKey, tKey)
-			stateDB := statedb.New(ctx, mocks.NewEVMKeeper(), statedb.NewEmptyTxConfig())
+			keeper := mocks.NewEVMKeeper()
+			stateDB := statedb.New(ctx, keeper, statedb.NewEmptyTxConfig())
 
 			_, addrs, err := testutil.GeneratePrivKeyAddressPairs(1)
 			require.NoError(t, err)
 			addr := addrs[0]
 			ethAddr := common.BytesToAddress(addr)
-			stateDB.AddBalance(ethAddr, uint256.NewInt(5), tracing.BalanceChangeUnspecified)
+			require.NoError(t, keeper.SetAccount(ctx, ethAddr, statedb.Account{Balance: uint256.NewInt(5)}))
+			require.Equal(t, uint256.NewInt(5), stateDB.GetBalance(ethAddr))
 
 			blockedAddr := authtypes.NewModuleAddress(precisebanktypes.ModuleName)
 			bankKeeper := cmnmocks.NewBankKeeper(t)
@@ -270,6 +276,9 @@ func TestAfterBalanceChangeFractionalEvents(t *testing.T) {
 			bh := cmn.NewBalanceHandlerFactory(bankKeeper).NewBalanceHandler()
 			bh.BeforeBalanceChange(ctx)
 
+			nativeBalance, err := uint256.FromDecimal(tc.expBalance)
+			require.NoError(t, err)
+			require.NoError(t, keeper.SetAccount(ctx, ethAddr, statedb.Account{Balance: nativeBalance}))
 			coins := sdk.NewCoins(sdk.NewInt64Coin(evmtypes.GetEVMCoinDenom(), 3))
 			ctx.EventManager().EmitEvents(sdk.Events{
 				banktypes.NewCoinSpentEvent(blockedAddr, coins),
@@ -277,7 +286,6 @@ func TestAfterBalanceChangeFractionalEvents(t *testing.T) {
 				precisebanktypes.NewEventFractionalBalanceChange(blockedAddr, sdkmath.ZeroInt(), sdkmath.NewInt(3)),
 				sdk.NewEvent(sdk.EventTypeMessage),
 				precisebanktypes.NewEventFractionalBalanceChange(addr, sdkmath.NewInt(5), sdkmath.NewInt(5+tc.delta)),
-				banktypes.NewCoinReceivedEvent(addr, coins),
 			})
 
 			for pass := 0; pass < 2; pass++ {

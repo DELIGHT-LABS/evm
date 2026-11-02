@@ -6,6 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/holiman/uint256"
 
 	"github.com/cosmos/evm/x/erc20/types"
 	"github.com/cosmos/evm/x/vm/statedb"
@@ -28,6 +29,7 @@ type EVMKeeper interface {
 	CallEVMWithData(ctx sdk.Context, stateDB *statedb.StateDB, from common.Address, contract *common.Address, data []byte, commit bool, callFromPrecompile bool, gasCap *big.Int) (*evmtypes.MsgEthereumTxResponse, error)
 	GetAccountOrEmpty(ctx sdk.Context, addr common.Address) statedb.Account
 	GetAccount(ctx sdk.Context, addr common.Address) *statedb.Account
+	GetBalance(ctx sdk.Context, addr common.Address) *uint256.Int
 	IsContract(ctx sdk.Context, addr common.Address) bool
 	GetState(ctx sdk.Context, addr common.Address, key common.Hash) common.Hash
 	GetCode(ctx sdk.Context, codeHash common.Hash) []byte

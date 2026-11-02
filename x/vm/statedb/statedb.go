@@ -54,6 +54,10 @@ type StateDB struct {
 	// snapshotter is used for snapshot creation and revert
 	// this snapshot is used for precompile call
 	snapshotter vmstoretypes.Snapshotter
+	// nativeScope selects the working context without changing the original
+	// storage context or the root cache used by final Commit.
+	nativeScope       *NativeScope
+	nativeActionDepth int
 
 	// Transient storage
 	transientStorage transientStorage
@@ -175,6 +179,9 @@ func (s *StateDB) GetContext() sdk.Context {
 
 // GetCacheContext returns the stateDB CacheContext.
 func (s *StateDB) GetCacheContext() (sdk.Context, error) {
+	if s.nativeScope != nil {
+		return s.nativeScope.ctx, nil
+	}
 	if s.writeCache == nil {
 		err := s.cache()
 		if err != nil {
@@ -187,11 +194,11 @@ func (s *StateDB) GetCacheContext() (sdk.Context, error) {
 // MultiStoreSnapshot snapshots stateDB CacheMultiStore
 // and returns snapshot index
 func (s *StateDB) MultiStoreSnapshot() int {
-	return s.snapshotter.Snapshot()
+	return s.nativeSnapshotter().Snapshot()
 }
 
 func (s *StateDB) RevertMultiStore(snapshot int) {
-	s.snapshotter.RevertToSnapshot(snapshot)
+	s.nativeSnapshotter().RevertToSnapshot(snapshot)
 }
 
 // cache creates the stateDB cache context
@@ -208,11 +215,14 @@ func (s *StateDB) cache() error {
 	// Create and set snapshot store to stateDB
 	snapshotStore := snapshotmulti.NewStore(cms, storeKeys)
 	s.snapshotter = snapshotStore
-	s.cacheCtx = s.cacheCtx.WithMultiStore(snapshotStore)
+	s.cacheCtx = s.cacheCtx.WithMultiStore(&nativeScopeStore{
+		nativeCacheStore: snapshotStore,
+		root:             true,
+	})
 	s.writeCache = func() {
 		eventsToEmit := s.cacheCtx.EventManager().Events()
 		s.ctx.EventManager().EmitEvents(eventsToEmit)
-		s.snapshotter.Commit()
+		snapshotStore.Write()
 	}
 
 	return nil
@@ -353,12 +363,28 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		return obj
 	}
 	// If no live objects are available, load it from keeper
-	account := s.keeper.GetAccount(s.ctx, addr)
+	// Select the live native store without also charging EVM account reads
+	// to an enclosing SDK call's meter. EVM opcode gas already accounts for
+	// these reads; explicit native reconciliation uses its own metered ctx.
+	mutableNativeView := s.writeCache != nil
+	ctx := s.ctx
+	if mutableNativeView {
+		ctx = s.nativeContext().
+			WithGasMeter(s.ctx.GasMeter()).
+			WithKVGasConfig(s.ctx.KVGasConfig()).
+			WithTransientKVGasConfig(s.ctx.TransientKVGasConfig())
+	}
+	account := s.keeper.GetAccount(ctx, addr)
 	if account == nil {
 		return nil
 	}
 	// Insert into the live set
 	obj := newObject(s, addr, *account)
+	// Original-context reads retain ordinary immutable EVM memoization.
+	// Reads from a native working view must disappear with that view's undo.
+	if mutableNativeView {
+		s.journal.append(cacheObjectChange{account: addr})
+	}
 	s.setStateObject(obj)
 	return obj
 }
@@ -377,7 +403,11 @@ func (s *StateDB) getOrNewStateObject(addr common.Address) *stateObject {
 func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) {
 	prev = s.getStateObject(addr)
 
-	newobj = newObject(s, addr, Account{})
+	account := Account{}
+	if prev != nil {
+		account.lockedBalance = prev.account.LockedBalanceSnapshot()
+	}
+	newobj = newObject(s, addr, account)
 	if prev == nil {
 		s.journal.append(createObjectChange{account: &addr})
 	} else {
@@ -437,39 +467,26 @@ func (s *StateDB) setStateObject(object *stateObject) {
 // with a snapshot of the multi-store and events previous
 // to the precompile call.
 func (s *StateDB) AddPrecompileFn(snapshot int) error {
-	// Capture events before the precompile call
-	prevEvents := s.cacheCtx.EventManager().Events()
-
-	// Reject before mutating the counter so that rejected calls cannot
-	// advance (and eventually wrap) it back into the accepted range.
-	if s.precompileCallsCounter >= types.MaxPrecompileCalls {
-		return fmt.Errorf("max calls to precompiles (%d) reached", types.MaxPrecompileCalls)
-	}
-
-	s.journal.append(precompileCallChange{
-		snapshot:                snapshot,
-		prevEvents:              prevEvents,
-		prevProcessedEventCount: s.processedEventsCount,
-	})
-	s.precompileCallsCounter++
-	return nil
+	_, err := s.addPrecompileCheckpoint(snapshot)
+	return err
 }
 
 // MarkEventProcessed records that the event at the given index
 // has been seen by BalanceHandler. Events must be marked sequentially.
 func (s *StateDB) MarkEventProcessed(idx int) {
+	processed := s.nativeProcessedEvents()
 	// Events must be processed sequentially - idx should equal current count
-	if idx != s.processedEventsCount {
+	if idx != *processed {
 		panic(fmt.Sprintf("balance events must be processed sequentially: expected %d, got %d",
-			s.processedEventsCount, idx))
+			*processed, idx))
 	}
-	s.processedEventsCount++
+	*processed++
 }
 
 // IsEventProcessed reports whether the event at idx has already been
 // seen by a previous AfterBalanceChange invocation.
 func (s *StateDB) IsEventProcessed(idx int) bool {
-	return idx < s.processedEventsCount
+	return idx < *s.nativeProcessedEvents()
 }
 
 // AddBalance adds amount to the account associated with addr.
@@ -705,6 +722,7 @@ func (s *StateDB) RevertToSnapshot(revid int) {
 		panic(fmt.Errorf("revision id %v cannot be reverted", revid))
 	}
 	snapshot := s.validRevisions[idx].journalIndex
+	s.validateNativeRollback(revid, snapshot)
 
 	// Replay the journal to undo changes and remove invalidated snapshots
 	// Event restoration is handled by precompileCallChange.Revert()
@@ -715,6 +733,9 @@ func (s *StateDB) RevertToSnapshot(revid int) {
 // Commit writes the dirty states to keeper.
 // The StateDB object should be discarded after being committed.
 func (s *StateDB) Commit() error {
+	if s.nativeScope != nil || s.nativeActionDepth != 0 {
+		return types.ErrNativeScopeOrder
+	}
 	// writeCache func will exist only when there's a call to a precompile.
 	// It applies all the store updates preformed by precompile calls.
 	if s.writeCache != nil {
@@ -740,13 +761,17 @@ func (s *StateDB) Commit() error {
 // This function is used before any precompile call to make sure the cacheCtx
 // is updated with the latest changes within the tx (StateDB's journal entries).
 func (s *StateDB) FlushToCacheCtx() error {
-	if err := s.commitWithCtx(s.cacheCtx); err != nil {
+	ctx, err := s.GetCacheContext()
+	if err != nil {
+		return err
+	}
+	if err := s.commitWithCtx(ctx); err != nil {
 		return err
 	}
 
 	// Set counter to event count - all flushed events (from mint/burn during commit) are now accounted for.
 	// This prevents the balance handler from re-adding already flushed events.
-	s.processedEventsCount = len(s.cacheCtx.EventManager().Events())
+	*s.nativeProcessedEvents() = len(ctx.EventManager().Events())
 
 	return nil
 }

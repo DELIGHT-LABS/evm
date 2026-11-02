@@ -38,6 +38,14 @@ func (k *atomicTestKeeper) GetAccount(ctx sdk.Context, addr common.Address) *sta
 	return &statedb.Account{Balance: new(uint256.Int).SetBytes(bz)}
 }
 
+func (k *atomicTestKeeper) GetBalance(ctx sdk.Context, addr common.Address) *uint256.Int {
+	account := k.GetAccount(ctx, addr)
+	if account == nil {
+		return new(uint256.Int)
+	}
+	return new(uint256.Int).Set(account.Balance)
+}
+
 func (k *atomicTestKeeper) SetAccount(ctx sdk.Context, addr common.Address, acc statedb.Account) error {
 	if addr == k.errAddr {
 		return errors.New("blocked")

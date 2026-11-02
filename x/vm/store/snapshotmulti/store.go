@@ -15,7 +15,16 @@ import (
 type Store struct {
 	stores    map[storetypes.StoreKey]types.SnapshotKVStore
 	storeKeys []*storetypes.KVStoreKey // ordered keys
-	head      int
+	layers    []*cacheBoundary
+
+	// A branch stays valid while its creation boundary and every ancestor
+	// survive. New snapshots do not invalidate an existing branch.
+	parent         *Store
+	parentBoundary *cacheBoundary
+}
+
+type cacheBoundary struct {
+	active bool
 }
 
 var _ types.SnapshotMultiStore = (*Store)(nil)
@@ -25,7 +34,6 @@ func NewStore(cms storetypes.CacheMultiStore, keys map[string]*storetypes.KVStor
 	s := &Store{
 		stores:    make(map[storetypes.StoreKey]types.SnapshotKVStore),
 		storeKeys: vmtypes.SortedKVStoreKeys(keys),
-		head:      types.InitialHead,
 	}
 
 	for _, key := range s.storeKeys {
@@ -40,7 +48,6 @@ func NewStore(cms storetypes.CacheMultiStore, keys map[string]*storetypes.KVStor
 func NewStoreWithKVStores(stores map[*storetypes.KVStoreKey]storetypes.CacheWrap) *Store {
 	s := &Store{
 		stores: make(map[storetypes.StoreKey]types.SnapshotKVStore),
-		head:   types.InitialHead,
 	}
 
 	for key, store := range stores {
@@ -58,13 +65,31 @@ func NewStoreWithKVStores(stores map[*storetypes.KVStoreKey]storetypes.CacheWrap
 // Snapshot pushes a new cached context to the stack,
 // and returns the index of it.
 func (s *Store) Snapshot() int {
+	s.assertValid()
 	for _, key := range s.storeKeys {
 		s.stores[key].Snapshot()
 	}
-	s.head++
+	s.layers = append(s.layers, &cacheBoundary{active: true})
 
-	// latest snapshot is just before head
-	return s.head - 1
+	return len(s.layers) - 1
+}
+
+// SnapshotGuard validates the lifetime of a KV handle created in the current
+// layer. New snapshots leave it valid; reverting its creation layer expires it.
+// The handle may follow newer current layers, but never a replacement for a
+// reverted boundary with a reused numeric snapshot index.
+func (s *Store) SnapshotGuard() func() {
+	s.assertValid()
+	var boundary *cacheBoundary
+	if len(s.layers) != 0 {
+		boundary = s.layers[len(s.layers)-1]
+	}
+	return func() {
+		s.assertValid()
+		if boundary != nil && !boundary.active {
+			panic("snapshotmulti: stale snapshot KV handle")
+		}
+	}
 }
 
 // RevertToSnapshot pops all the cached stores
@@ -72,10 +97,17 @@ func (s *Store) Snapshot() int {
 // The target should be snapshot index returned by `Snapshot`.
 // This function panics if the index is out of bounds.
 func (s *Store) RevertToSnapshot(target int) {
+	s.assertValid()
+	if target < 0 || target >= len(s.layers) {
+		panic(fmt.Errorf("snapshot index %d out of bound [%d..%d)", target, 0, len(s.layers)))
+	}
 	for _, key := range s.storeKeys {
 		s.stores[key].RevertToSnapshot(target)
 	}
-	s.head = target
+	for _, layer := range s.layers[target:] {
+		layer.active = false
+	}
+	s.layers = s.layers[:target]
 }
 
 // GetStoreType returns the type of the store.
@@ -98,10 +130,27 @@ func (s *Store) CacheWrapWithTrace(_ io.Writer, _ storetypes.TraceContext) store
 	return s.CacheWrap()
 }
 
-// CacheMultiStore snapshots store and return current store.
+// CacheMultiStore reserves a snapshot boundary and returns an independent SDK
+// cache branch. Its writes stay private until Write merges them into the
+// parent's current layer; discarding the branch does not change parent values.
+// Branches are single-use and expire when their creation boundary is reverted
+// or their parent is committed. Nested branches are written from the inside out.
 func (s *Store) CacheMultiStore() storetypes.CacheMultiStore {
 	s.Snapshot()
-	return s
+	child := &Store{
+		stores:         make(map[storetypes.StoreKey]types.SnapshotKVStore, len(s.storeKeys)),
+		storeKeys:      s.storeKeys,
+		parent:         s,
+		parentBoundary: s.layers[len(s.layers)-1],
+	}
+	for _, key := range s.storeKeys {
+		child.stores[key] = snapshotkv.NewStore(snapshotkv.NewCacheWithParent(func() storetypes.KVStore {
+			// Retained KV caches can write without entering this multistore.
+			child.assertValid()
+			return s.GetKVStore(key)
+		}))
+	}
+	return child
 }
 
 // CacheMultiStoreWithVersion load stores at a snapshot version.
@@ -113,6 +162,7 @@ func (s *Store) CacheMultiStoreWithVersion(_ int64) (storetypes.CacheMultiStore,
 
 // GetStore returns an underlying Store by key.
 func (s *Store) GetStore(key storetypes.StoreKey) storetypes.Store {
+	s.assertValid()
 	store := s.stores[key]
 	if key == nil || store == nil {
 		panic(fmt.Sprintf("kv store with key %v has not been registered in stores", key))
@@ -122,6 +172,7 @@ func (s *Store) GetStore(key storetypes.StoreKey) storetypes.Store {
 
 // GetKVStore returns an underlying KVStore by key.
 func (s *Store) GetKVStore(key storetypes.StoreKey) storetypes.KVStore {
+	s.assertValid()
 	store := s.stores[key]
 	if key == nil || store == nil {
 		panic(fmt.Sprintf("kv store with key %v has not been registered in stores", key))
@@ -154,21 +205,32 @@ func (s *Store) SetTracingContext(_ storetypes.TraceContext) storetypes.MultiSto
 
 // LatestVersion returns the branch version of the store
 func (s *Store) LatestVersion() int64 {
-	return int64(s.head)
+	return int64(len(s.layers))
 }
 
-// Write flushes all pending changes in the current store layer
+// Write commits this store's caches only. For an SDK branch, its initial stores
+// are private caches that merge into their immediate parent's current layer,
+// not the outer transaction store. Root writes are final and clear the stack.
 func (s *Store) Write() {
-	for _, key := range s.storeKeys {
-		s.stores[key].Flush()
-	}
-}
-
-// Commit commits all the cached stores from top to bottom in order
-// and clears the cache stack by setting an empty slice of cache store.
-func (s *Store) Commit() {
+	// Validate every ancestor before writing any substore. Removed boundaries
+	// and repeated handles must not silently write into another revision.
+	s.assertValid()
 	for _, key := range s.storeKeys {
 		s.stores[key].Commit()
 	}
-	s.head = types.InitialHead
+	for _, layer := range s.layers {
+		layer.active = false
+	}
+	s.layers = nil
+	s.parentBoundary = nil
+}
+
+func (s *Store) assertValid() {
+	if s.parent == nil {
+		return
+	}
+	s.parent.assertValid()
+	if s.parentBoundary == nil || !s.parentBoundary.active {
+		panic("snapshotmulti: stale or already written cache branch")
+	}
 }

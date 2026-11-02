@@ -2,12 +2,9 @@ package common
 
 import (
 	"fmt"
-	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/tracing"
 
-	"github.com/cosmos/evm/utils"
 	precisebanktypes "github.com/cosmos/evm/x/precisebank/types"
 	"github.com/cosmos/evm/x/vm/statedb"
 
@@ -47,9 +44,9 @@ func (bh *BalanceHandler) BeforeBalanceChange(ctx sdk.Context) {
 	bh.prevEventsLen = len(ctx.EventManager().Events())
 }
 
-// AfterBalanceChange processes the recorded events and updates the stateDB accordingly.
-// It handles the bank events for coin spent and coin received, updating the balances
-// of the spender and receiver addresses respectively.
+// AfterBalanceChange validates balance events and imports loaded accounts'
+// absolute balances from the active native view.
+// Forwarded events can be observed repeatedly without applying a delta twice.
 //
 // NOTES: Balance change events involving BlockedAddresses are bypassed.
 // Native balances are handled separately to prevent cases where a bank coin transfer
@@ -66,58 +63,58 @@ func (bh *BalanceHandler) BeforeBalanceChange(ctx sdk.Context) {
 // Instead, the state changes resulting from the precompile call are applied directly via the MultiStore.
 func (bh *BalanceHandler) AfterBalanceChange(ctx sdk.Context, stateDB *statedb.StateDB) error {
 	events := ctx.EventManager().Events()
+	var addresses []common.Address
 
-	for i, event := range events[bh.prevEventsLen:] {
-		eventIdx := bh.prevEventsLen + i
-
-		// Skip events already processed by flushing before the precompile was called.
-		if stateDB.IsEventProcessed(eventIdx) {
-			continue
-		}
-
+	for _, event := range events[bh.prevEventsLen:] {
 		switch event.Type {
 		case banktypes.EventTypeCoinSpent:
 			spenderAddr, err := ParseAddress(event, banktypes.AttributeKeySpender)
 			if err != nil {
 				return fmt.Errorf("failed to parse spender address from event %q: %w", banktypes.EventTypeCoinSpent, err)
 			}
-			if bh.bankKeeper.BlockedAddr(spenderAddr) {
+			if len(spenderAddr) != common.AddressLength || bh.bankKeeper.BlockedAddr(spenderAddr) {
 				// Bypass blocked addresses
-				break
+				continue
 			}
 
 			amount, err := ParseAmount(event)
 			if err != nil {
 				return fmt.Errorf("failed to parse amount from event %q: %w", banktypes.EventTypeCoinSpent, err)
 			}
+			if amount.IsZero() {
+				continue
+			}
 
-			stateDB.SubBalance(common.BytesToAddress(spenderAddr.Bytes()), amount, tracing.BalanceChangeUnspecified)
+			addresses = append(addresses, common.BytesToAddress(spenderAddr.Bytes()))
 
 		case banktypes.EventTypeCoinReceived:
 			receiverAddr, err := ParseAddress(event, banktypes.AttributeKeyReceiver)
 			if err != nil {
 				return fmt.Errorf("failed to parse receiver address from event %q: %w", banktypes.EventTypeCoinReceived, err)
 			}
-			if bh.bankKeeper.BlockedAddr(receiverAddr) {
+			if len(receiverAddr) != common.AddressLength || bh.bankKeeper.BlockedAddr(receiverAddr) {
 				// Bypass blocked addresses
-				break
+				continue
 			}
 
 			amount, err := ParseAmount(event)
 			if err != nil {
 				return fmt.Errorf("failed to parse amount from event %q: %w", banktypes.EventTypeCoinReceived, err)
 			}
+			if amount.IsZero() {
+				continue
+			}
 
-			stateDB.AddBalance(common.BytesToAddress(receiverAddr.Bytes()), amount, tracing.BalanceChangeUnspecified)
+			addresses = append(addresses, common.BytesToAddress(receiverAddr.Bytes()))
 
 		case precisebanktypes.EventTypeFractionalBalanceChange:
 			addr, err := ParseAddress(event, precisebanktypes.AttributeKeyAddress)
 			if err != nil {
 				return fmt.Errorf("failed to parse address from event %q: %w", precisebanktypes.EventTypeFractionalBalanceChange, err)
 			}
-			if bh.bankKeeper.BlockedAddr(addr) {
+			if len(addr) != common.AddressLength || bh.bankKeeper.BlockedAddr(addr) {
 				// Bypass blocked addresses
-				break
+				continue
 			}
 
 			delta, err := ParseFractionalAmount(event)
@@ -125,19 +122,29 @@ func (bh *BalanceHandler) AfterBalanceChange(ctx sdk.Context, stateDB *statedb.S
 				return fmt.Errorf("failed to parse amount from event %q: %w", precisebanktypes.EventTypeFractionalBalanceChange, err)
 			}
 
-			deltaAbs, err := utils.Uint256FromBigInt(new(big.Int).Abs(delta))
-			if err != nil {
-				return fmt.Errorf("failed to convert delta to Uint256: %w", err)
+			if delta.BitLen() > 256 {
+				return fmt.Errorf("fractional balance delta exceeds uint256")
 			}
+			if delta.Sign() == 0 {
+				continue
+			}
+			addresses = append(addresses, common.BytesToAddress(addr.Bytes()))
 
-			if delta.Sign() == 1 {
-				stateDB.AddBalance(common.BytesToAddress(addr.Bytes()), deltaAbs, tracing.BalanceChangeUnspecified)
-			} else if delta.Sign() == -1 {
-				stateDB.SubBalance(common.BytesToAddress(addr.Bytes()), deltaAbs, tracing.BalanceChangeUnspecified)
-			}
+		default:
+			continue
 		}
-
-		stateDB.MarkEventProcessed(eventIdx)
+	}
+	if len(addresses) != 0 {
+		if err := stateDB.ReconcileNativeBalances(ctx, addresses...); err != nil {
+			return err
+		}
+	}
+	// Keep the legacy observation API consistent; balance correctness no
+	// longer depends on event-manager-local indices surviving forwarding.
+	for i := range events {
+		if !stateDB.IsEventProcessed(i) {
+			stateDB.MarkEventProcessed(i)
+		}
 	}
 
 	return nil

@@ -63,21 +63,12 @@ func (p Precompile) runNativeAction(evm *vm.EVM, contract *vm.Contract, action N
 		return nil, errors.New(ErrNotRunInEvm)
 	}
 
-	// get the stateDB cache ctx
-	ctx, err := stateDB.GetCacheContext()
+	// Capture the active native owner before the action can create SDK caches.
+	ctx, end, err := stateDB.BeginNativeAction()
 	if err != nil {
 		return nil, err
 	}
-
-	// take a snapshot of the current state before any changes
-	// to be able to revert the changes
-	snapshot := stateDB.MultiStoreSnapshot()
-
-	// add precompileCall entry on the stateDB journal
-	// this allows to revert the changes within an evm tx
-	if err := stateDB.AddPrecompileFn(snapshot); err != nil {
-		return nil, err
-	}
+	defer end()
 
 	// commit the current changes in the cache ctx
 	// to get the updated state for the precompile call
@@ -85,18 +76,14 @@ func (p Precompile) runNativeAction(evm *vm.EVM, contract *vm.Contract, action N
 		return nil, err
 	}
 
-	initialGas := ctx.GasMeter().GasConsumed()
-
-	// set the default SDK gas configuration to track gas usage
-	// we are changing the gas meter type, so it panics gracefully when out of gas
+	// This frame has its own remaining EVM allowance. The incoming SDK meter
+	// may contain an enclosing native action's consumed gas; copying that
+	// baseline would spend the child's allowance a second time.
 	ctx = ctx.WithGasMeter(storetypes.NewGasMeter(contract.Gas)).
 		WithKVGasConfig(p.KvGasConfig).
 		WithTransientKVGasConfig(p.TransientKVGasConfig)
 
-	defer HandleGasError(ctx, contract, initialGas, &err)()
-
-	// we need to consume the gas that was already used by the EVM
-	ctx.GasMeter().ConsumeGas(initialGas, "creating a new gas meter")
+	defer HandleGasError(ctx, contract, 0, &err)()
 
 	var balanceHandler *BalanceHandler
 	if p.BalanceHandlerFactory != nil {
@@ -112,16 +99,18 @@ func (p Precompile) runNativeAction(evm *vm.EVM, contract *vm.Contract, action N
 		return bz, err
 	}
 
-	cost := ctx.GasMeter().GasConsumed() - initialGas
+	if balanceHandler != nil {
+		err = balanceHandler.AfterBalanceChange(ctx, stateDB)
+	}
 
+	// Reconciliation reads native state too. Include them in the debit even
+	// when reconciliation fails after an otherwise successful native action.
+	cost := ctx.GasMeter().GasConsumed()
 	if !contract.UseGas(cost, nil, tracing.GasChangeCallPrecompiledContract) {
 		return nil, vm.ErrOutOfGas
 	}
-
-	if balanceHandler != nil {
-		if err := balanceHandler.AfterBalanceChange(ctx, stateDB); err != nil {
-			return nil, err
-		}
+	if err != nil {
+		return nil, err
 	}
 
 	return bz, nil

@@ -33,6 +33,10 @@ const (
 	codeErrABIUnpack
 	codeErrInvalidPreinstall
 	codeErrNilStateDB
+	codeErrNativeBalance
+	codeErrNativeScopeContext
+	codeErrNativeScopeOrder
+	codeErrNativeScopeCoverage
 )
 
 var (
@@ -98,6 +102,18 @@ var (
 
 	// ErrNilStateDB
 	ErrNilStateDB = errorsmod.Register(ModuleName, codeErrNilStateDB, "stateDB cannot be nil")
+
+	// ErrNativeBalance returns an error if a native balance cannot use the saved locked offset.
+	ErrNativeBalance = errorsmod.Register(ModuleName, codeErrNativeBalance, "native balance cannot be represented with the saved locked offset")
+
+	// ErrNativeScopeContext returns an error if a scope lacks its active enclosing native context.
+	ErrNativeScopeContext = errorsmod.Register(ModuleName, codeErrNativeScopeContext, "native scope requires its active enclosing native context")
+
+	// ErrNativeScopeOrder returns an error if native scopes or actions finish out of order.
+	ErrNativeScopeOrder = errorsmod.Register(ModuleName, codeErrNativeScopeOrder, "native scopes and actions must finish once, inside out")
+
+	// ErrNativeScopeCoverage returns an error if native rollback lacks a live enclosing checkpoint.
+	ErrNativeScopeCoverage = errorsmod.Register(ModuleName, codeErrNativeScopeCoverage, "native rollback is not covered by a live enclosing checkpoint")
 )
 
 // RevertReasonBytes converts a message to ABI-encoded revert bytes.

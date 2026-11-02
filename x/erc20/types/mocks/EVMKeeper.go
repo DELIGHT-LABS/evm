@@ -23,6 +23,8 @@ import (
 
 	types "github.com/cosmos/cosmos-sdk/types"
 
+	uint256 "github.com/holiman/uint256"
+
 	vmtypes "github.com/cosmos/evm/x/vm/types"
 )
 
@@ -221,6 +223,26 @@ func (_m *EVMKeeper) GetAccountWithoutBalance(ctx types.Context, addr common.Add
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*statedb.Account)
+		}
+	}
+
+	return r0
+}
+
+// GetBalance provides a mock function with given fields: ctx, addr
+func (_m *EVMKeeper) GetBalance(ctx types.Context, addr common.Address) *uint256.Int {
+	ret := _m.Called(ctx, addr)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBalance")
+	}
+
+	var r0 *uint256.Int
+	if rf, ok := ret.Get(0).(func(types.Context, common.Address) *uint256.Int); ok {
+		r0 = rf(ctx, addr)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*uint256.Int)
 		}
 	}
 
