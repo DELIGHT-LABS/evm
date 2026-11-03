@@ -658,5 +658,5 @@
   "deployedLinkReferences": {},
   "immutableReferences": {},
   "inputSourceName": "project/solidity/precompiles/testutil/contracts/GovCaller.sol",
-  "buildInfoId": "solc-0_8_26-cd455ee9838ed8b5a06eaf10c486c7a5744886bc"
+  "buildInfoId": "solc-0_8_26-cf0f43604ad1b9f61ad00aa4b6340310f99f8395"
 }

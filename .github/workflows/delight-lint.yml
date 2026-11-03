@@ -10,6 +10,8 @@ on:
       - "release/v0.*.x-delight"
       - "release/v0.*.x-xpla"
       - "release/v0.*.x-maroo"
+    paths-ignore:
+      - ".mergify.yml"
   merge_group:
 
 concurrency:

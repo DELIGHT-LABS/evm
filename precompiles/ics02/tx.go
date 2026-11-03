@@ -14,6 +14,8 @@ import (
 	host "github.com/cosmos/ibc-go/v11/modules/core/24-host"
 	ibcexported "github.com/cosmos/ibc-go/v11/modules/core/exported"
 
+	errorsmod "cosmossdk.io/errors"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
@@ -47,6 +49,13 @@ func (p *Precompile) UpdateClient(
 
 	clientMsg, err := clienttypes.UnmarshalClientMessage(p.cdc, updateBz)
 	if err != nil {
+		return nil, cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UpdateClientMethod, err, nil).Err
+	}
+
+	// UnmarshalClientMessage returns (nil, nil) for empty bytes or an Any with an
+	// empty type URL, so reject that here instead of calling ValidateBasic on nil.
+	if clientMsg == nil {
+		err := errorsmod.Wrap(clienttypes.ErrInvalidClientType, "client message cannot be empty")
 		return nil, cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UpdateClientMethod, err, nil).Err
 	}
 

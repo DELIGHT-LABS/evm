@@ -2,6 +2,8 @@ name: Tests
 on:
   merge_group:
   pull_request:
+    paths-ignore:
+      - ".mergify.yml"
   push:
     branches:
       - main
@@ -22,7 +24,7 @@ jobs:
     steps:
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           check-latest: true
       - uses: actions/checkout@v4
       - uses: technote-space/get-diff-action@v6.1.2
@@ -74,4 +76,3 @@ jobs:
         run: |
           make test-scripts
         if: env.GIT_DIFF
-
