@@ -1,21 +1,23 @@
 package testutil
 
 import (
+	evmtypes "github.com/cosmos/evm/x/vm/types"
+
 	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
-	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 )
 
 // FundAccount is a utility function that funds an account by minting and
-// sending the coins to the address.
+// sending the coins to the address. The EVM module account provides the mint
+// permission, including on applications that do not install x/mint.
 func FundAccount(ctx sdk.Context, bankKeeper bankkeeper.Keeper, addr sdk.AccAddress, amounts sdk.Coins) error {
-	if err := bankKeeper.MintCoins(ctx, minttypes.ModuleName, amounts); err != nil {
+	if err := bankKeeper.MintCoins(ctx, evmtypes.ModuleName, amounts); err != nil {
 		return err
 	}
 
-	return bankKeeper.SendCoinsFromModuleToAccount(ctx, minttypes.ModuleName, addr, amounts)
+	return bankKeeper.SendCoinsFromModuleToAccount(ctx, evmtypes.ModuleName, addr, amounts)
 }
 
 // FundAccountWithBaseDenom is a utility function that uses the FundAccount function
@@ -34,11 +36,12 @@ func FundAccountWithBaseDenom(ctx sdk.Context, bankKeeper bankkeeper.Keeper, add
 }
 
 // FundModuleAccount is a utility function that funds a module account by
-// minting and sending the coins to the address.
+// minting and sending the coins to the address. The EVM module account provides
+// the mint permission, including on applications that do not install x/mint.
 func FundModuleAccount(ctx sdk.Context, bankKeeper bankkeeper.Keeper, recipientMod string, amounts sdk.Coins) error {
-	if err := bankKeeper.MintCoins(ctx, minttypes.ModuleName, amounts); err != nil {
+	if err := bankKeeper.MintCoins(ctx, evmtypes.ModuleName, amounts); err != nil {
 		return err
 	}
 
-	return bankKeeper.SendCoinsFromModuleToModule(ctx, minttypes.ModuleName, recipientMod, amounts)
+	return bankKeeper.SendCoinsFromModuleToModule(ctx, evmtypes.ModuleName, recipientMod, amounts)
 }

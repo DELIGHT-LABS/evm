@@ -103,7 +103,7 @@ func (suite *ICS20TransferTestSuite) TestHandleMsgTransfer() {
 			},
 		},
 		{
-			"transfer entire balance",
+			"reject unbounded spend limit",
 			func(_ evmibctesting.SenderAccount) {
 				evmAppA := suite.chainA.App.(*evmd.EVMD)
 				sourceDenomToTransfer, err = evmAppA.StakingKeeper.BondDenom(suite.chainA.GetContext())
@@ -172,12 +172,23 @@ func (suite *ICS20TransferTestSuite) TestHandleMsgTransfer() {
 			)
 			suite.Require().NoError(err)
 
-			res, _, _, err := suite.chainA.SendEvmTx(senderAccount, senderIdx, suite.chainAPrecompile.Address(), big.NewInt(0), data, 0)
+			res, _, txEvmRes, err := suite.chainA.SendEvmTx(senderAccount, senderIdx, suite.chainAPrecompile.Address(), big.NewInt(0), data, 0)
+			if msgAmount.Equal(transfertypes.UnboundedSpendLimit()) {
+				suite.Require().ErrorContains(err, vm.ErrExecutionReverted.Error())
+				suite.Require().NotNil(txEvmRes)
+				// The precompile rejects this sentinel before keeper translation;
+				// preserve its existing Error(string) bytes.
+				expected, packErr := evmtypes.RevertReasonBytes(ics20.ErrUnboundedSpendLimit + ": " + transfertypes.ErrInvalidAmount.Error())
+				suite.Require().NoError(packErr)
+				suite.Require().Equal(expected, txEvmRes.Ret)
+				suite.Require().Equal(senderBalance, GetBalance(senderAddr))
+				return
+			}
 			suite.Require().NoError(err) // message committed
 			packet, err := evmibctesting.ParsePacketFromEvents(res.Events)
 			suite.Require().NoError(err)
 
-			// Get the packet data to determine the amount of tokens being transferred (needed for sending entire balance)
+			// Get the packet data to determine the amount of tokens being transferred.
 			packetData, err := transfertypes.UnmarshalPacketData(packet.GetData(), pathAToB.EndpointA.GetChannel().Version, "")
 			suite.Require().NoError(err)
 			transferAmount, ok := sdkmath.NewIntFromString(packetData.Token.Amount)
@@ -188,10 +199,6 @@ func (suite *ICS20TransferTestSuite) TestHandleMsgTransfer() {
 				senderBalance.Amount.Sub(transferAmount).String(),
 				afterSenderBalance.Amount.String(),
 			)
-			if msgAmount == transfertypes.UnboundedSpendLimit() {
-				suite.Require().Equal("0", afterSenderBalance.Amount.String(), "sender should have no balance left")
-			}
-
 			relayerAddr := suite.chainA.SenderAccounts[0].SenderAccount.GetAddress()
 			relayerBalance := GetBalance(relayerAddr)
 

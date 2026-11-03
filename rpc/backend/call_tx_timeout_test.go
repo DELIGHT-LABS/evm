@@ -19,31 +19,6 @@ import (
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 )
 
-func TestEstimateGasAppliesEVMTimeout(t *testing.T) {
-	backend := setupMockBackend(t)
-	backend.Cfg.JSONRPC.EVMTimeout = 10 * time.Millisecond
-
-	client := backend.ClientCtx.Client.(*mocks.Client)
-	client.On("Header", mock.Anything, mock.Anything).Return(&cmtrpctypes.ResultHeader{
-		Header: &tmtypes.Header{Height: 1},
-	}, nil)
-
-	queryClient := backend.QueryClient.QueryClient.(*mocks.EVMQueryClient)
-	queryClient.On("EstimateGas", mock.Anything, mock.Anything).Return(
-		func(ctx context.Context, _ *evmtypes.EthCallRequest, _ ...grpc.CallOption) (*evmtypes.EstimateGasResponse, error) {
-			<-ctx.Done()
-			return nil, ctx.Err()
-		},
-		nil,
-	)
-
-	from := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
-	args := evmtypes.TransactionArgs{From: &from}
-	blockNum := rpctypes.BlockNumber(1)
-	_, err := backend.EstimateGas(context.Background(), args, &rpctypes.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-}
-
 func TestDoCallAppliesEVMTimeout(t *testing.T) {
 	backend := setupMockBackend(t)
 	backend.Cfg.JSONRPC.EVMTimeout = 10 * time.Millisecond

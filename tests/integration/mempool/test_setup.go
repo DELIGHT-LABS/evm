@@ -11,11 +11,11 @@ import (
 	"github.com/cosmos/evm/testutil/integration/evm/grpc"
 	"github.com/cosmos/evm/testutil/integration/evm/network"
 	"github.com/cosmos/evm/testutil/keyring"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	sdkmath "cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 )
 
 // MempoolIntegrationTestSuite is the base test suite for mempool integration tests.
@@ -140,10 +140,10 @@ func (s *IntegrationTestSuite) FundAccount(addr sdk.AccAddress, amount sdkmath.I
 	coins := sdk.NewCoins(sdk.NewCoin(denom, amount))
 
 	// Use the bank keeper to mint and send coins to the account
-	err := s.network.App.GetBankKeeper().MintCoins(s.network.GetContext(), minttypes.ModuleName, coins)
+	err := s.network.App.GetBankKeeper().MintCoins(s.network.GetContext(), evmtypes.ModuleName, coins)
 	s.Require().NoError(err)
 
-	err = s.network.App.GetBankKeeper().SendCoinsFromModuleToAccount(s.network.GetContext(), minttypes.ModuleName, addr, coins)
+	err = s.network.App.GetBankKeeper().SendCoinsFromModuleToAccount(s.network.GetContext(), evmtypes.ModuleName, addr, coins)
 	s.Require().NoError(err)
 }
 

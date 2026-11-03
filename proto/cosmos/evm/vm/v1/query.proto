@@ -401,3 +401,24 @@ message QueryGlobalMinGasPriceResponse {
     (gogoproto.nullable) = false
   ];
 }
+
+// QueryErrorDetail carries transaction rejection data in a gRPC error status.
+// It is an error detail, not a successful query response.
+message QueryErrorDetail {
+  // rpc_code is the Ethereum JSON-RPC error code, not the gRPC status code.
+  int64 rpc_code = 1;
+  // revert_data contains Solidity ABI-encoded error bytes.
+  bytes revert_data = 2;
+  // rpc_data_json preserves the JSON-RPC error data as JSON, including null.
+  bytes rpc_data_json = 3;
+  // cosmos_error is present only when the source has a Cosmos error identity.
+  CosmosError cosmos_error = 4;
+
+  // CosmosError identifies a registered Cosmos error independently of its text.
+  message CosmosError {
+    // codespace is the namespace of the registered Cosmos error.
+    string codespace = 1;
+    // code is the error code within the codespace.
+    uint32 code = 2;
+  }
+}

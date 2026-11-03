@@ -13,6 +13,22 @@
   {
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "expected",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "actual",
+        "type": "uint256"
+      }
+    ],
+    "name": "ChainIdMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "string",
         "name": "eventKind",
         "type": "string"
@@ -24,6 +40,36 @@
       }
     ],
     "name": "EventEmitFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "FeeCapTooHigh",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "FloorDataGasTooLow",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "GasLimitExceeded",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "GasPriceTooLow",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InsufficientFee",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "IntrinsicGasTooLow",
     "type": "error"
   },
   {
@@ -124,6 +170,11 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "InvalidSender",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "string",
@@ -137,6 +188,16 @@
       }
     ],
     "name": "MsgServerFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NonceGap",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NonceTooLow",
     "type": "error"
   },
   {
@@ -204,6 +265,16 @@
   {
     "inputs": [],
     "name": "SDKUnauthorized",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TipAboveFeeCap",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TipTooHigh",
     "type": "error"
   },
   {

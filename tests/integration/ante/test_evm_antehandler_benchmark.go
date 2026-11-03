@@ -142,19 +142,23 @@ func (s *benchmarkSuite) generateTxType(txType string) (sdktypes.Tx, error) {
 
 func (s *benchmarkSuite) generateHandlerOptions() ante.HandlerOptions {
 	encCfg := s.network.GetEncodingConfig()
-	ibcKeeper := s.network.App.(evm.IBCKeeperProvider).GetIBCKeeper()
-	return ante.HandlerOptions{
+	options := ante.HandlerOptions{
 		Cdc:                    s.network.App.AppCodec(),
 		AccountKeeper:          s.network.App.GetAccountKeeper(),
 		BankKeeper:             s.network.App.GetBankKeeper(),
 		ExtensionOptionChecker: antetypes.HasDynamicFeeExtensionOption,
 		EvmKeeper:              s.network.App.GetEVMKeeper(),
-		FeegrantKeeper:         s.network.App.GetFeeGrantKeeper(),
-		IBCKeeper:              ibcKeeper,
 		FeeMarketKeeper:        s.network.App.GetFeeMarketKeeper(),
 		SignModeHandler:        encCfg.TxConfig.SignModeHandler(),
 		SigGasConsumer:         ante.SigVerificationGasConsumer,
 		MaxTxGasWanted:         1_000_000_000,
 		DynamicFeeChecker:      true,
 	}
+	if provider, ok := s.network.CoreApp().(evm.IBCKeeperProvider); ok {
+		options.IBCKeeper = provider.GetIBCKeeper()
+	}
+	if provider, ok := s.network.CoreApp().(evm.FeeGrantKeeperProvider); ok {
+		options.FeegrantKeeper = provider.GetFeeGrantKeeper()
+	}
+	return options
 }

@@ -1,6 +1,7 @@
 package types_test
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -10,6 +11,23 @@ import (
 
 	"github.com/cosmos/evm/x/vm/types"
 )
+
+func TestNewChainIDMismatchErrorCopiesInputs(t *testing.T) {
+	expected := new(big.Int).Lsh(big.NewInt(1), 100)
+	actual := new(big.Int).Add(expected, big.NewInt(1))
+	wantExpected, wantActual := new(big.Int).Set(expected), new(big.Int).Set(actual)
+
+	err := types.NewChainIDMismatchError(expected, actual)
+	require.Equal(t, wantExpected, err.Expected)
+	require.Equal(t, wantActual, err.Actual)
+	message := err.Error()
+
+	expected.SetInt64(1)
+	actual.SetInt64(2)
+	require.Equal(t, wantExpected, err.Expected)
+	require.Equal(t, wantActual, err.Actual)
+	require.EqualError(t, err, message)
+}
 
 func TestNewExecErrorWithReason(t *testing.T) {
 	testCases := []struct {

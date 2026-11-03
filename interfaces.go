@@ -225,15 +225,14 @@ type (
 		TestApp
 		AccountKeeperProvider
 		DistrKeeperProvider
-		Erc20KeeperProvider
 		FeeMarketKeeperProvider
 		GovKeeperProvider
-		MintKeeperProvider
 		SlashingKeeperProvider
 		EvidenceKeeperProvider
 	}
 	Erc20IntegrationApp interface {
 		IntegrationNetworkApp
+		Erc20KeeperProvider
 		TransferKeeperProvider
 		IBCKeeperProvider
 	}
@@ -243,11 +242,10 @@ type (
 	}
 	AnteIntegrationApp interface {
 		IntegrationNetworkApp
-		FeeGrantKeeperProvider
-		IBCKeeperProvider
 	}
 	IBCIntegrationApp interface {
 		IntegrationNetworkApp
+		Erc20KeeperProvider
 		TransferKeeperProvider
 		IBCKeeperProvider
 	}

@@ -2,10 +2,11 @@ package network
 
 import (
 	"github.com/cosmos/evm"
+	testapp "github.com/cosmos/evm/testutil/app"
 	"github.com/cosmos/evm/x/vm/statedb"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	sdktypes "github.com/cosmos/cosmos-sdk/types"
-	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 )
 
 // UnitTestNetwork is the implementation of the Network interface for unit tests.
@@ -28,7 +29,7 @@ func NewUnitTestNetwork(createEvmApp CreateEvmApp, opts ...ConfigOption) *UnitTe
 	network := New(createEvmApp, opts...)
 	return &UnitTestNetwork{
 		IntegrationNetwork: *network,
-		App:                network.app,
+		App:                testapp.NewEvmAppAdapter(network.app),
 	}
 }
 
@@ -42,12 +43,14 @@ func (n *UnitTestNetwork) GetStateDB() *statedb.StateDB {
 }
 
 // FundAccount funds the given account with the given amount of coins.
+// The EVM module account provides the mint permission, including on
+// applications that do not install x/mint.
 func (n *UnitTestNetwork) FundAccount(addr sdktypes.AccAddress, coins sdktypes.Coins) error {
 	ctx := n.GetContext()
 
-	if err := n.app.GetBankKeeper().MintCoins(ctx, minttypes.ModuleName, coins); err != nil {
+	if err := n.app.GetBankKeeper().MintCoins(ctx, evmtypes.ModuleName, coins); err != nil {
 		return err
 	}
 
-	return n.app.GetBankKeeper().SendCoinsFromModuleToAccount(ctx, minttypes.ModuleName, addr, coins)
+	return n.app.GetBankKeeper().SendCoinsFromModuleToAccount(ctx, evmtypes.ModuleName, addr, coins)
 }

@@ -14,6 +14,7 @@ import (
 	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
 	host "github.com/cosmos/ibc-go/v11/modules/core/24-host"
 
+	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -106,6 +107,12 @@ func (p Precompile) newMsgTransfer(method *abi.Method, args []interface{}) (*tra
 		return nil, common.Address{}, cmn.NewRevertWithSolidityError(ABI, cmn.SolidityErrInvalidAmount, fmt.Sprintf("%v", args[3]))
 	}
 
+	// The ICS20 precompile requires an explicit amount and does not support the send-all sentinel.
+	transferAmount := math.NewIntFromBigInt(amount)
+	if transferAmount.Equal(transfertypes.UnboundedSpendLimit()) {
+		return nil, common.Address{}, errorsmod.Wrap(transfertypes.ErrInvalidAmount, ErrUnboundedSpendLimit)
+	}
+
 	sender, ok := args[4].(common.Address)
 	if !ok {
 		return nil, common.Address{}, cmn.NewRevertWithSolidityError(ABI, cmn.SolidityErrInvalidAddress, fmt.Sprintf("%v", args[4]))
@@ -138,7 +145,7 @@ func (p Precompile) newMsgTransfer(method *abi.Method, args []interface{}) (*tra
 	// Use instance to prevent errors on denom or amount
 	token := sdk.Coin{
 		Denom:  denom,
-		Amount: math.NewIntFromBigInt(amount),
+		Amount: transferAmount,
 	}
 
 	msg, err := CreateAndValidateMsgTransfer(sourcePort, sourceChannel, token, sdk.AccAddress(sender.Bytes()).String(), receiver, input.TimeoutHeight, timeoutTimestamp, memo)

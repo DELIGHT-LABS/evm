@@ -1,7 +1,10 @@
 package types
 
 import (
+	"context"
 	"fmt"
+
+	"google.golang.org/grpc"
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/proto/tendermint/crypto"
@@ -27,7 +30,7 @@ type QueryClient struct {
 func NewQueryClient(clientCtx client.Context) *QueryClient {
 	return &QueryClient{
 		ServiceClient: tx.NewServiceClient(clientCtx),
-		QueryClient:   evmtypes.NewQueryClient(clientCtx),
+		QueryClient:   &abciContextQueryClient{QueryClient: evmtypes.NewQueryClient(clientCtx), clientCtx: clientCtx},
 		FeeMarket:     feemarkettypes.NewQueryClient(clientCtx),
 	}
 }
@@ -59,4 +62,20 @@ func (QueryClient) GetProof(clientCtx client.Context, storeKey string, key []byt
 	}
 
 	return abciRes.Value, abciRes.ProofOps, nil
+}
+
+// abciContextQueryClient retains the per-request context when SDK Invoke falls back
+// to ABCI. The SDK uses the client command context for that transport, rather
+// than the gRPC method context. Other query methods retain their existing path.
+type abciContextQueryClient struct {
+	evmtypes.QueryClient
+	clientCtx client.Context
+}
+
+func (c *abciContextQueryClient) EthCall(ctx context.Context, req *evmtypes.EthCallRequest, opts ...grpc.CallOption) (*evmtypes.MsgEthereumTxResponse, error) {
+	return evmtypes.NewQueryClient(c.clientCtx.WithCmdContext(ctx)).EthCall(ctx, req, opts...)
+}
+
+func (c *abciContextQueryClient) EstimateGas(ctx context.Context, req *evmtypes.EthCallRequest, opts ...grpc.CallOption) (*evmtypes.EstimateGasResponse, error) {
+	return evmtypes.NewQueryClient(c.clientCtx.WithCmdContext(ctx)).EstimateGas(ctx, req, opts...)
 }

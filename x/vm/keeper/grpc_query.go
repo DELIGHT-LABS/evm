@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/bits"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -252,6 +253,7 @@ func (k Keeper) Params(c context.Context, _ *types.QueryParamsRequest) (_ *types
 
 // EthCall implements eth_call rpc api.
 func (k Keeper) EthCall(c context.Context, req *types.EthCallRequest) (_ *types.MsgEthereumTxResponse, err error) {
+	defer func() { err = rpctypes.QueryError(c, err) }()
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
@@ -284,17 +286,18 @@ func (k Keeper) EthCall(c context.Context, req *types.EthCallRequest) (_ *types.
 	args.Nonce = (*hexutil.Uint64)(&nonce)
 
 	if err := args.CallDefaults(req.GasCap, cfg.BaseFee, types.GetEthChainConfig().ChainID); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, rpctypes.QueryErrorWithStatus(c, codes.InvalidArgument, err)
 	}
 
 	msg := args.ToMessage(cfg.BaseFee, false, false)
 	txConfig := statedb.NewEmptyTxConfig()
+	ctx, tracingHooks := k.prepareTracing(ctx, *msg, txConfig, false)
 
 	// pass false to not commit StateDB
 	stateDB := statedb.New(ctx, &k, txConfig)
-	res, err := k.ApplyMessageWithConfig(ctx, stateDB, *msg, nil, false, false, cfg, txConfig, false, overrides)
+	res, err := k.ApplyMessageWithConfig(ctx, stateDB, *msg, tracingHooks, false, false, cfg, txConfig, false, overrides)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, rpctypes.QueryErrorWithStatus(c, codes.Internal, err)
 	}
 
 	return res, nil
@@ -302,6 +305,7 @@ func (k Keeper) EthCall(c context.Context, req *types.EthCallRequest) (_ *types.
 
 // EstimateGas implements eth_estimateGas rpc api.
 func (k Keeper) EstimateGas(c context.Context, req *types.EthCallRequest) (_ *types.EstimateGasResponse, err error) {
+	defer func() { err = rpctypes.QueryError(c, err) }()
 	return k.EstimateGasInternal(c, req, types.RPC)
 }
 
@@ -368,27 +372,35 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 		return nil, status.Error(codes.Internal, "failed to load evm config")
 	}
 
-	// ApplyMessageWithConfig expect correct nonce set in msg
-	nonce := k.GetNonce(ctx, args.GetFrom())
-	args.Nonce = (*hexutil.Uint64)(&nonce)
-
 	txConfig := statedb.NewEmptyTxConfig()
+	estimateCtx := ctx
+	executionOverrides := overrides
+	if overrides != nil {
+		estimateCtx, executionOverrides, err = k.prepareEstimateSenderOverrides(ctx, args.GetFrom(), overrides, txConfig, hi)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// ApplyMessageWithConfig expects the effective nonce set in msg.
+	nonce := k.GetNonce(estimateCtx, args.GetFrom())
+	args.Nonce = (*hexutil.Uint64)(&nonce)
 
 	if args.Gas == nil {
 		args.Gas = new(hexutil.Uint64)
 	}
 	if err := args.CallDefaults(req.GasCap, cfg.BaseFee, types.GetEthChainConfig().ChainID); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, rpctypes.QueryErrorWithStatus(c, codes.InvalidArgument, err)
 	}
-
 	// convert the tx args to an ethereum message
 	msg := args.ToMessage(cfg.BaseFee, true, true)
+	txType := args.TxType(ethtypes.LegacyTxType)
 
 	// Recap the highest gas limit with account's available balance.
 	if msg.GasFeeCap.BitLen() != 0 {
 		baseDenom := types.GetEVMCoinDenom()
 
-		balance := k.bankWrapper.SpendableCoin(ctx, sdk.AccAddress(args.From.Bytes()), baseDenom)
+		balance := k.bankWrapper.SpendableCoin(estimateCtx, sdk.AccAddress(args.From.Bytes()), baseDenom)
 		available := balance.Amount
 		transfer := "0"
 		if args.Value != nil {
@@ -412,45 +424,64 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 		}
 	}
 
+	hasHooks := k.HasHooks()
+	var lastCandidate *txCandidateResult
 	// NOTE: the errors from the executable below should be consistent with go-ethereum,
 	// so we don't wrap them with the gRPC status code
 
 	// create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (vmError bool, rsp *types.MsgEthereumTxResponse, err error) {
+		if err = c.Err(); err != nil {
+			return true, nil, err
+		}
 		// update the message with the new gas value
 		msg.GasLimit = gas
+		lastCandidate = nil
 
-		tmpCtx := ctx
+		tmpCtx := estimateCtx
 		if fromType == types.RPC {
-			tmpCtx, _ = ctx.CacheContext()
-
-			acct := k.GetAccount(tmpCtx, msg.From)
-
-			from := msg.From
-			if acct == nil {
-				acc := k.accountKeeper.NewAccountWithAddress(tmpCtx, from[:])
-				k.accountKeeper.SetAccount(tmpCtx, acc)
-				acct = statedb.NewEmptyAccount()
-			}
-			// When submitting a transaction, the `EthIncrementSenderSequence` ante handler increases the account nonce
-			acct.Nonce = nonce + 1
-			err = k.SetAccount(tmpCtx, from, *acct)
+			tmpCtx, err = k.prepareEstimateCandidateContext(estimateCtx, *msg, nonce, hasHooks)
 			if err != nil {
 				return true, nil, err
 			}
-			// resetting the gasMeter after increasing the sequence to have an accurate gas estimation on EVM extensions transactions
-			tmpCtx = buildTraceCtx(tmpCtx, msg.GasLimit)
 		}
-		// pass false to not commit StateDB
-		stateDB := statedb.New(tmpCtx, &k, txConfig)
-		rsp, err = k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, nil, false, false, cfg, txConfig, false, overrides)
-		if err != nil {
-			if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrFloorDataGas) {
+		if !hasHooks {
+			// Each gas candidate owns a fresh tracing lifecycle.
+			tmpCtx, tracingHooks := k.prepareTracing(tmpCtx, *msg, txConfig, false)
+			// pass false to not commit StateDB
+			stateDB := statedb.New(tmpCtx, &k, txConfig)
+			rsp, err = k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, tracingHooks, false, false, cfg, txConfig, false, executionOverrides)
+			if err != nil {
+				if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrFloorDataGas) {
+					return true, nil, nil // Special case, raise gas limit
+				}
+				return true, nil, err // Bail out
+			}
+			return len(rsp.VmError) > 0, rsp, nil
+		}
+
+		candidate, candidateErr := k.runTxCandidate(tmpCtx, txCandidateInput{
+			msg:       *msg,
+			txType:    txType,
+			cfg:       cfg,
+			txConfig:  txConfig,
+			overrides: executionOverrides,
+			simulate:  true,
+		})
+		if candidateErr != nil {
+			if errors.Is(candidateErr, core.ErrIntrinsicGas) || errors.Is(candidateErr, core.ErrFloorDataGas) {
 				return true, nil, nil // Special case, raise gas limit
 			}
-			return true, nil, err // Bail out
+			return true, nil, candidateErr // Bail out
 		}
-		return len(rsp.VmError) > 0, rsp, nil
+		if candidate == nil {
+			return true, nil, fmt.Errorf("candidate execution returned no result")
+		}
+		lastCandidate = candidate
+		if candidate.outOfGas {
+			return true, candidate.response, nil
+		}
+		return candidate.response.Failed(), candidate.response, nil
 	}
 
 	// Adapted from go-ethereum gas estimator for early short-circuit and optimistic bounds:
@@ -460,53 +491,72 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 	// directly try 21000. Returning 21000 without any execution is dangerous as
 	// some tx field combos might bump the price up even for plain transfers (e.g.
 	// unused access list items). Ever so slightly wasteful, but safer overall.
+	shortcutSucceeded := false
 	if len(msg.Data) == 0 && msg.To != nil {
 		acct := k.GetAccountWithoutBalance(ctx, *msg.To)
 		if acct == nil || !acct.HasCodeHash() {
 			failed, _, err := executable(ethparams.TxGas)
-			if err == nil && !failed {
+			if hasHooks {
+				if err != nil {
+					return nil, err
+				}
+				if !failed {
+					hi = ethparams.TxGas
+					shortcutSucceeded = true
+				}
+			} else if err == nil && !failed {
 				return &types.EstimateGasResponse{Gas: ethparams.TxGas}, nil
 			}
 		}
 	}
 
-	// We first execute the transaction at the highest allowable gas limit, since if this fails we
-	// can return error immediately.
-	failed, result, err := executable(hi)
-	if err != nil {
-		return nil, err
-	}
-	if failed {
-		// Preserve Cosmos error semantics when the cap is reached
-		if hi == gasCap {
-			if result != nil && result.VmError != vm.ErrOutOfGas.Error() {
-				if result.VmError == vm.ErrExecutionReverted.Error() {
-					return &types.EstimateGasResponse{
-						Ret:     result.Ret,
-						VmError: result.VmError,
-					}, nil
-				}
-				return nil, errors.New(result.VmError)
-			}
-			return nil, fmt.Errorf("gas required exceeds allowance (%d)", gasCap)
-		}
-		// If no larger allowance is available, fail fast
-		return nil, fmt.Errorf("gas required exceeds allowance (%d)", hi)
-	}
-
-	// There's a fairly high chance for the transaction to execute successfully
-	// with gasLimit set to the first execution's usedGas + gasRefund. Explicitly
-	// check that gas amount and use as a limit for the binary search.
-	optimisticGasLimit := (result.MaxUsedGas + ethparams.CallStipend) * 64 / 63
-	if optimisticGasLimit < hi {
-		failed, _, err = executable(optimisticGasLimit)
+	if !shortcutSucceeded {
+		// We first execute the transaction at the highest allowable gas limit, since if this fails we
+		// can return error immediately.
+		failed, result, err := executable(hi)
 		if err != nil {
 			return nil, err
 		}
 		if failed {
-			lo = optimisticGasLimit
-		} else {
-			hi = optimisticGasLimit
+			// Preserve Cosmos error semantics when the cap is reached
+			if hi == gasCap {
+				if result != nil && result.VmError != vm.ErrOutOfGas.Error() {
+					if result.VmError == vm.ErrExecutionReverted.Error() {
+						return &types.EstimateGasResponse{
+							Ret:     result.Ret,
+							VmError: result.VmError,
+						}, nil
+					}
+					return nil, errors.New(result.VmError)
+				}
+				return nil, fmt.Errorf("gas required exceeds allowance (%d)", gasCap)
+			}
+			// If no larger allowance is available, fail fast
+			return nil, fmt.Errorf("gas required exceeds allowance (%d)", hi)
+		}
+
+		// There's a fairly high chance for the transaction to execute successfully
+		// with gasLimit set to the first execution's usedGas + gasRefund. Explicitly
+		// check that gas amount and use as a limit for the binary search.
+		optimisticUsed := result.MaxUsedGas
+		if hasHooks && lastCandidate != nil {
+			combinedRaw, carry := bits.Add64(lastCandidate.rawEVMGas, lastCandidate.hookGas, 0)
+			if carry != 0 {
+				return nil, fmt.Errorf("%w: raw EVM and hook gas", types.ErrGasOverflow)
+			}
+			optimisticUsed = max(result.MaxUsedGas, combinedRaw)
+		}
+		optimisticGasLimit := (optimisticUsed + ethparams.CallStipend) * 64 / 63
+		if optimisticGasLimit < hi {
+			failed, _, err = executable(optimisticGasLimit)
+			if err != nil {
+				return nil, err
+			}
+			if failed {
+				lo = optimisticGasLimit
+			} else {
+				hi = optimisticGasLimit
+			}
 		}
 	}
 
@@ -515,8 +565,98 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 	if err != nil {
 		return nil, err
 	}
-
+	if hasHooks {
+		failed, _, err := executable(hi)
+		if err != nil {
+			return nil, err
+		}
+		if failed {
+			return nil, fmt.Errorf("final gas probe for %d failed", hi)
+		}
+	}
 	return &types.EstimateGasResponse{Gas: hi}, nil
+}
+
+func (k *Keeper) prepareEstimateCandidateContext(
+	parentCtx sdk.Context,
+	msg core.Message,
+	nonce uint64,
+	deductFees bool,
+) (sdk.Context, error) {
+	ctx, _ := parentCtx.CacheContext()
+	from := msg.From
+	account := k.GetAccount(ctx, from)
+	if account == nil {
+		newAccount := k.accountKeeper.NewAccountWithAddress(ctx, from[:])
+		k.accountKeeper.SetAccount(ctx, newAccount)
+		account = statedb.NewEmptyAccount()
+	}
+
+	if deductFees {
+		fees := txFeesFromGasPrice(msg.GasLimit, msg.GasPrice, types.GetEVMCoinDenom())
+		if len(fees) > 0 {
+			if err := k.DeductTxCostsFromUserBalance(ctx, fees, from); err != nil {
+				return sdk.Context{}, err
+			}
+			account = k.GetAccount(ctx, from)
+			if account == nil {
+				return sdk.Context{}, fmt.Errorf("failed to prepare estimate account %s", from)
+			}
+		}
+	}
+
+	// EthIncrementSenderSequence runs after fee deduction during transaction delivery.
+	account.Nonce = nonce + 1
+	if err := k.SetAccount(ctx, from, *account); err != nil {
+		return sdk.Context{}, err
+	}
+
+	// Exclude query preparation from the candidate's gas accounting.
+	return buildTraceCtx(ctx, msg.GasLimit), nil
+}
+
+func (k *Keeper) prepareEstimateSenderOverrides(
+	parentCtx sdk.Context,
+	sender common.Address,
+	overrides *rpctypes.StateOverride,
+	txConfig statedb.TxConfig,
+	gasLimit uint64,
+) (sdk.Context, *rpctypes.StateOverride, error) {
+	account, found := (*overrides)[sender]
+	if !found || (account.Balance == nil && account.Nonce == nil) {
+		return parentCtx, overrides, nil
+	}
+
+	// Materialize only the sender fields needed by the simulated ante flow.
+	// Other overrides stay at EVM execution time to preserve their gas semantics.
+	senderOverrides := rpctypes.StateOverride{
+		sender: {
+			Balance: account.Balance,
+			Nonce:   account.Nonce,
+		},
+	}
+	executionOverrides := make(rpctypes.StateOverride, len(*overrides))
+	for address, overrideAccount := range *overrides {
+		if address == sender {
+			overrideAccount.Balance = nil
+			overrideAccount.Nonce = nil
+		}
+		executionOverrides[address] = overrideAccount
+	}
+
+	ctx, _ := parentCtx.CacheContext()
+	ctx = buildTraceCtx(ctx, gasLimit)
+	stateDB := statedb.New(ctx, k, txConfig)
+	blockTime := uint64(ctx.BlockTime().Unix()) // #nosec G115 -- int overflow is not a concern here
+	rules := types.GetEthChainConfig().Rules(big.NewInt(ctx.BlockHeight()), true, blockTime)
+	if _, err := k.applyStateOverrides(ctx, stateDB, rules, &senderOverrides); err != nil {
+		return sdk.Context{}, nil, fmt.Errorf("failed to apply state override: %w", err)
+	}
+	if err := stateDB.Commit(); err != nil {
+		return sdk.Context{}, nil, fmt.Errorf("failed to commit state override: %w", err)
+	}
+
+	return ctx, &executionOverrides, nil
 }
 
 type traceTxConfig struct {
@@ -608,10 +748,11 @@ func (k Keeper) TraceTx(c context.Context, req *types.QueryTraceTxRequest) (_ *t
 		txConfig.TxIndex = uint(i)
 
 		ctx = buildTraceCtx(ctx, msg.GasLimit)
+		replayCtx, tracingHooks := k.prepareTracing(ctx, *msg, txConfig, true)
 		// we ignore the error here. this endpoint, ideally, is called internally from the ETH backend, which will call this query
 		// using all previous txs in the trace transaction's block. some of those _could_ be invalid transactions.
-		stateDB := statedb.New(ctx, &k, txConfig)
-		rsp, _ := k.ApplyMessageWithConfig(ctx, stateDB, *msg, nil, true, false, cfg, txConfig, false, nil)
+		stateDB := statedb.New(replayCtx, &k, txConfig)
+		rsp, _ := k.ApplyMessageWithConfig(replayCtx, stateDB, *msg, tracingHooks, true, false, cfg, txConfig, false, nil)
 		if rsp != nil {
 			ctx.GasMeter().ConsumeGas(rsp.GasUsed, "evm predecessor tx")
 		}
@@ -928,8 +1069,9 @@ func (k *Keeper) traceTxWithMsg(
 
 	// Build EVM execution context
 	ctx = buildTraceCtx(ctx, msg.GasLimit)
+	ctx, tracingHooks := k.prepareTracingWithBase(ctx, *msg, txConfig, config.commit, tracer.Hooks)
 	stateDB := statedb.New(ctx, k, txConfig)
-	_, err = k.ApplyMessageWithConfig(ctx, stateDB, *msg, tracer.Hooks, config.commit, false, config.evmConfig, txConfig, false, config.stateOverrides)
+	_, err = k.ApplyMessageWithConfig(ctx, stateDB, *msg, tracingHooks, config.commit, false, config.evmConfig, txConfig, false, config.stateOverrides)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}

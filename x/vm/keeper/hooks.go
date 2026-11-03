@@ -43,3 +43,19 @@ func (mh MultiEvmHooks) PostTxProcessing(ctx sdk.Context, sender common.Address,
 	}
 	return nil
 }
+
+// EstimatePostTxProcessing delegates to the estimation path of every hook.
+func (mh MultiEvmHooks) EstimatePostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) (err error) {
+	ctx, span := ctx.StartSpan(tracer, "MultiEVMHooks.EstimatePostTxProcessing", trace.WithAttributes(
+		attribute.String("sender", sender.Hex()),
+		attribute.String("tx_hash", receipt.TxHash.Hex()),
+		attribute.Int("hooks_count", len(mh)),
+	))
+	defer func() { evmtrace.EndSpanErr(span, err) }()
+	for i := range mh {
+		if err := mh[i].EstimatePostTxProcessing(ctx, sender, msg, receipt); err != nil {
+			return errorsmod.Wrapf(err, "EVM hook %T failed", mh[i])
+		}
+	}
+	return nil
+}

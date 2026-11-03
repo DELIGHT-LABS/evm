@@ -19,7 +19,7 @@ func newCosmosAnteHandler(ctx sdk.Context, options HandlerOptions) sdk.AnteHandl
 		txFeeChecker = evmante.NewDynamicFeeChecker(&feemarketParams)
 	}
 
-	return sdk.ChainAnteDecorators(
+	decorators := []sdk.AnteDecorator{
 		cosmosante.NewRejectMessagesDecorator(), // reject MsgEthereumTxs
 		cosmosante.NewAuthzLimiterDecorator( // disable the Msg types that cannot be included on an authz.MsgExec msgs field
 			sdk.MsgTypeURL(&evmtypes.MsgEthereumTx{}),
@@ -39,6 +39,9 @@ func newCosmosAnteHandler(ctx sdk.Context, options HandlerOptions) sdk.AnteHandl
 		ante.NewSigGasConsumeDecorator(options.AccountKeeper, options.SigGasConsumer),
 		ante.NewSigVerificationDecorator(options.AccountKeeper, options.SignModeHandler),
 		ante.NewIncrementSequenceDecorator(options.AccountKeeper),
-		ibcante.NewRedundantRelayDecorator(options.IBCKeeper),
-	)
+	}
+	if options.IBCKeeper != nil {
+		decorators = append(decorators, ibcante.NewRedundantRelayDecorator(options.IBCKeeper))
+	}
+	return sdk.ChainAnteDecorators(decorators...)
 }

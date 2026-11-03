@@ -219,6 +219,12 @@ func (s *GenesisTestSuite) TestInitGenesis() {
 
 // TestExportGenesis verifies ExportGenesis output
 func (s *GenesisTestSuite) TestExportGenesis() {
+	initialContractCount := 0
+	s.network.App.GetEVMKeeper().IterateContracts(s.network.GetContext(), func(_ common.Address, _ common.Hash) bool {
+		initialContractCount++
+		return false
+	})
+
 	contractAddr, err := s.factory.DeployContract(
 		s.keyring.GetPrivKey(0),
 		types.EvmTxArgs{},
@@ -242,8 +248,7 @@ func (s *GenesisTestSuite) TestExportGenesis() {
 	s.Require().NoError(s.network.NextBlock())
 
 	genState := vm.ExportGenesis(s.network.GetContext(), s.network.App.GetEVMKeeper())
-	// Exported accounts 4 default preinstalls
-	s.Require().Len(genState.Accounts, 8)
+	s.Require().Len(genState.Accounts, initialContractCount+2)
 
 	addrs := make([]string, len(genState.Accounts))
 	for i, acct := range genState.Accounts {

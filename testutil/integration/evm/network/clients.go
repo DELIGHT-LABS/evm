@@ -1,6 +1,7 @@
 package network
 
 import (
+	"github.com/cosmos/evm"
 	erc20types "github.com/cosmos/evm/x/erc20/types"
 	feemarkettypes "github.com/cosmos/evm/x/feemarket/types"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
@@ -31,7 +32,8 @@ func getQueryHelper(ctx sdktypes.Context, encCfg testutil.TestEncodingConfig) *b
 
 func (n *IntegrationNetwork) GetERC20Client() erc20types.QueryClient {
 	queryHelper := getQueryHelper(n.GetContext(), n.GetEncodingConfig())
-	erc20types.RegisterQueryServer(queryHelper, n.app.GetErc20Keeper())
+	provider := n.app.(evm.Erc20KeeperProvider)
+	erc20types.RegisterQueryServer(queryHelper, provider.GetErc20Keeper())
 	return erc20types.NewQueryClient(queryHelper)
 }
 
@@ -80,6 +82,8 @@ func (n *IntegrationNetwork) GetDistrClient() distrtypes.QueryClient {
 
 func (n *IntegrationNetwork) GetMintClient() minttypes.QueryClient {
 	queryHelper := getQueryHelper(n.GetContext(), n.GetEncodingConfig())
-	minttypes.RegisterQueryServer(queryHelper, mintkeeper.NewQueryServerImpl(n.app.GetMintKeeper()))
+	if provider, ok := n.app.(evm.MintKeeperProvider); ok {
+		minttypes.RegisterQueryServer(queryHelper, mintkeeper.NewQueryServerImpl(provider.GetMintKeeper()))
+	}
 	return minttypes.NewQueryClient(queryHelper)
 }

@@ -36,7 +36,7 @@ func CreateEvmd(chainID string, evmChainID uint64, customBaseAppOptions ...func(
 	loadLatest := true
 	appOptions := NewAppOptionsWithFlagHomeAndChainID(defaultNodeHome, evmChainID)
 
-	baseAppOptions := append(customBaseAppOptions, baseapp.SetChainID(chainID))
+	customBaseAppOptions = append(customBaseAppOptions, baseapp.SetChainID(chainID))
 
 	// Start the app
 	app := evmd.NewExampleApp(
@@ -44,7 +44,7 @@ func CreateEvmd(chainID string, evmChainID uint64, customBaseAppOptions ...func(
 		db,
 		loadLatest,
 		appOptions,
-		baseAppOptions...,
+		customBaseAppOptions...,
 	)
 
 	// Prepare the client context
