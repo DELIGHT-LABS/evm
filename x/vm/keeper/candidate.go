@@ -7,7 +7,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/tracing"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -77,20 +76,14 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	}()
 	evmCtx := buildTraceCtx(candidateCtx, input.msg.GasLimit)
 
-	// tx-wide trace collection (non-consensus; best-effort)
-	collector := newTxTraceCollector()
-	var innerTracer *tracing.Hooks
-	if k.tracer != "" {
-		innerTracer = k.Tracer(evmCtx, input.msg, types.GetEthChainConfig())
-	}
-	wrapperTracer := newTxTraceHooks(innerTracer, collector)
+	evmCtx, tracingHooks := k.prepareTracing(evmCtx, input.msg, input.txConfig, !input.simulate)
 	// pass true to commit the StateDB
 	stateDB := statedb.New(evmCtx, k, input.txConfig)
 	response, rawEVMGas, err := k.applyMessageWithConfig(
 		evmCtx,
 		stateDB,
 		input.msg,
-		wrapperTracer,
+		tracingHooks,
 		true,
 		false,
 		input.cfg,
@@ -119,19 +112,17 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	activeCtx := evmCtx
 	if response.Failed() {
 		// If the tx failed we discard the old context and create a new one, so
-		// PostTxProcessing can persist data even if the tx fails.
+		// PostTxProcessing can persist data even if the tx fails. Preserve the
+		// execution context so post-tx hooks can still access tracer state.
 		candidateCtx, commitCandidate = parentCtx.CacheContext()
-		activeCtx = buildTraceCtx(candidateCtx, input.msg.GasLimit)
+		activeCtx = buildTraceCtx(candidateCtx, input.msg.GasLimit).
+			WithContext(evmCtx.Context())
 	}
 
 	ethLogs := types.LogsToEthereum(response.Logs)
 	receipt := newCandidateReceipt(parentCtx, input, response, ethLogs)
 	result.receipt = receipt
 
-	// Persist tx-wide trace into the currently active cache context so that
-	// PostTxProcessing can read it, and so the failed-tx path (tmpCtx reset)
-	// writes into the correct object store.
-	persistTxTraceObject(activeCtx, k.objectKey, uint64(input.txConfig.TxIndex), collector)
 	hookLimit := input.msg.GasLimit - result.rawEVMGas
 	hookGas, hookOutOfGas, hookErr := executePostTxHooks(activeCtx, hookLimit, func(hookCtx sdk.Context) error {
 		if input.simulate {
