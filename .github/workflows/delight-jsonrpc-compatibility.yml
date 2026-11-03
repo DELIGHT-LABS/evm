@@ -1,0 +1,95 @@
+name: DELIGHT / JSON-RPC Compatibility
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main-delight
+      - main-xpla
+      - main-maroo
+      - "release/v0.*.x-delight"
+      - "release/v0.*.x-xpla"
+      - "release/v0.*.x-maroo"
+    paths:
+      - ".github/workflows/delight-jsonrpc-compatibility.yml"
+      - "tests/jsonrpc/**"
+      - "rpc/**"
+      - "evmd/**"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "evmd/go.mod"
+      - "evmd/go.sum"
+      - "Makefile"
+  merge_group:
+  push:
+    branches:
+      - main-delight
+      - main-xpla
+      - main-maroo
+      - "release/v0.*.x-delight"
+      - "release/v0.*.x-xpla"
+      - "release/v0.*.x-maroo"
+    paths:
+      - ".github/workflows/delight-jsonrpc-compatibility.yml"
+      - "tests/jsonrpc/**"
+      - "rpc/**"
+      - "evmd/**"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "evmd/go.mod"
+      - "evmd/go.sum"
+      - "Makefile"
+
+concurrency:
+  group: delight-jsonrpc-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: JSON-RPC
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            evmd/go.sum
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run JSON-RPC compatibility tests
+        shell: bash
+        run: |
+          set +e
+          make test-rpc-compat > test_output.log 2>&1
+          test_status=$?
+          set -e
+
+          cat test_output.log
+
+          failed_count=$(sed -nE 's/.*Failed:[[:space:]]*([0-9]+).*/\1/p' test_output.log | tail -1)
+          failed_count=${failed_count:-0}
+
+          if [ "$failed_count" -gt 0 ]; then
+            echo "Found $failed_count failed JSON-RPC compatibility tests"
+            exit 1
+          fi
+
+          if [ "$test_status" -ne 0 ]; then
+            echo "JSON-RPC compatibility infrastructure exited with status $test_status"
+            exit "$test_status"
+          fi

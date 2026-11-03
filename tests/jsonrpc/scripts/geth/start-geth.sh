@@ -9,7 +9,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 # Configuration
 CONTAINER_NAME="geth-jsonrpc-test"
-GETH_IMAGE="ethereum/client-go:v1.16.3"
+GETH_IMAGE="ethereum/client-go:v1.17.2"
 DATA_DIR="$PROJECT_ROOT/tests/jsonrpc/.geth-data"
 CHAIN_ID=4221
 

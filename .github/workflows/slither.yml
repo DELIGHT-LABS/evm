@@ -2,6 +2,8 @@ name: Slither Analysis
 
 on:
   pull_request:
+    paths-ignore:
+      - ".mergify.yml"
 permissions: read-all
 
 jobs:

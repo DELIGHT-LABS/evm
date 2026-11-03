@@ -145,6 +145,7 @@ docker run --rm --privileged -v "$DATA_DIR:/data" --user root --entrypoint="" co
     sed -i 's/timeout_precommit_delta = \"500ms\"/timeout_precommit_delta = \"100ms\"/g' /data/config/config.toml
     sed -i 's/timeout_commit = \"5s\"/timeout_commit = \"500ms\"/g' /data/config/config.toml
     sed -i 's/timeout_broadcast_tx_commit = \"10s\"/timeout_broadcast_tx_commit = \"5s\"/g' /data/config/config.toml
+    sed -i 's/type = \"flood\"/type = \"app\"/g' /data/config/config.toml
     
     # Enable prometheus metrics and all APIs for dev node
     sed -i 's/prometheus = false/prometheus = true/' /data/config/config.toml
