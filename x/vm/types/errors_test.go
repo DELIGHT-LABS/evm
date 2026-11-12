@@ -1,6 +1,8 @@
 package types_test
 
 import (
+	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -11,6 +13,29 @@ import (
 
 	"github.com/cosmos/evm/x/vm/types"
 )
+
+type testRejection struct{}
+
+func (testRejection) Error() string          { return "policy denied" }
+func (testRejection) HandledExecutionError() {}
+
+func TestIsHandledExecutionError(t *testing.T) {
+	denial := testRejection{}
+	infra := errors.New("observation failed")
+	for _, tc := range []struct {
+		err error
+		ok  bool
+	}{
+		{denial, true},
+		{fmt.Errorf("wrapped: %w", denial), true},
+		{errors.Join(denial, denial), true},
+		{errors.Join(denial, infra), false},
+		{fmt.Errorf("wrapped: %w", errors.Join(denial, infra)), false},
+		{infra, false},
+	} {
+		require.Equal(t, tc.ok, types.IsHandledExecutionError(tc.err))
+	}
+}
 
 func TestNewChainIDMismatchErrorCopiesInputs(t *testing.T) {
 	expected := new(big.Int).Lsh(big.NewInt(1), 100)

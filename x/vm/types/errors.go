@@ -180,3 +180,37 @@ func (e *RevertError) RevertData() []byte {
 	}
 	return common.CopyBytes(e.revertBytes)
 }
+
+// HandledExecutionError marks an error whose entire subtree's presentation is
+// owned by the application. Callers retain their own error-handling decisions.
+type HandledExecutionError interface {
+	error
+	HandledExecutionError()
+}
+
+// IsHandledExecutionError follows wrappers; unmarked joins are handled only
+// when every cause is handled.
+func IsHandledExecutionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, ok := err.(HandledExecutionError); ok {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !IsHandledExecutionError(child) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return IsHandledExecutionError(wrapped.Unwrap())
+	}
+	return false
+}

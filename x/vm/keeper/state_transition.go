@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -264,6 +265,19 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (_ 
 		cfg:      cfg,
 		txConfig: txConfig,
 	})
+	if result != nil && (result.hookFailed || result.outOfGas) {
+		k.Logger(ctx).Error(
+			"tx post processing failed",
+			"tx_hash", txConfig.TxHash.Hex(),
+			"tx_type", tx.Type(),
+			"tx_index", txConfig.TxIndex,
+			"evm_raw_gas_used", result.rawEVMGas,
+			"post_hook_gas_used", result.hookGas,
+			"charged_gas_used", result.chargedGas,
+			"gas_limit", msg.GasLimit,
+			"out_of_gas", result.outOfGas,
+		)
+	}
 	if err != nil {
 		// when a transaction contains multiple msg, as long as one of the msg fails
 		// all gas will be deducted. so is not msg.Gas()
@@ -289,15 +303,21 @@ func (k *Keeper) applyTransactionWithoutPostTxHooks(
 	tmpCtx, commitFn := ctx.CacheContext()
 
 	tmpCtx, tracingHooks := k.prepareTracing(tmpCtx, msg, txConfig, true)
-	// pass true to commit the StateDB
 	stateDB := statedb.New(tmpCtx, k, txConfig)
-	res, err := k.ApplyMessageWithConfig(tmpCtx, stateDB, msg, tracingHooks, true, false, cfg, txConfig, false, nil)
+	execution, err := k.executeMessageWithConfig(tmpCtx, stateDB, msg, tracingHooks, true, false, cfg, txConfig, false, nil)
+	if err == nil && execution.cause != nil && !types.IsHandledExecutionError(execution.cause) {
+		err = errorsmod.Wrap(execution.cause, "EVM execution rejected")
+	}
+	if err == nil {
+		err = commitMessageState(stateDB, false)
+	}
 	if err != nil {
 		// when a transaction contains multiple msg, as long as one of the msg fails
 		// all gas will be deducted. so is not msg.Gas()
 		k.ResetGasMeterAndConsumeGas(tmpCtx, tmpCtx.GasMeter().Limit())
 		return nil, errorsmod.Wrap(err, "failed to apply ethereum core message")
 	}
+	res := execution.response
 
 	ethLogs := types.LogsToEthereum(res.Logs)
 	// Compute block bloom filter
@@ -414,7 +434,29 @@ func (k *Keeper) applyStateOverrides(ctx sdk.Context, stateDB *statedb.StateDB, 
 	return precompiles, nil
 }
 
+// applyMessageWithConfig executes a message and applies its state when commit is true.
+// Transaction candidates use executeMessageWithConfig to classify errors before committing.
 func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateDB, msg core.Message, tracingHooks *tracing.Hooks, commit bool, callFromPrecompile bool, cfg *statedb.EVMConfig, txConfig statedb.TxConfig, internal bool, overrides *rpctypes.StateOverride) (_ *types.MsgEthereumTxResponse, rawEVMGasUsed uint64, err error) {
+	outcome, err := k.executeMessageWithConfig(ctx, stateDB, msg, tracingHooks, commit, callFromPrecompile, cfg, txConfig, internal, overrides)
+	if err != nil {
+		return outcome.response, outcome.rawEVMGas, err
+	}
+	preserveReadOnlyRevert := !commit && types.IsHandledExecutionError(outcome.cause) && errors.Is(outcome.vmErr, vm.ErrExecutionReverted)
+	if outcome.cause != nil && !preserveReadOnlyRevert {
+		return outcome.response, outcome.rawEVMGas, errorsmod.Wrap(outcome.cause, "EVM execution rejected")
+	}
+	if commit {
+		if err := commitMessageState(stateDB, callFromPrecompile); err != nil {
+			return nil, 0, err
+		}
+	}
+	return outcome.response, outcome.rawEVMGas, nil
+}
+
+// executeMessageWithConfig runs the EVM and finalizes tracing without committing
+// the StateDB. commit records the caller's intent in the tracing span.
+func (k *Keeper) executeMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateDB, msg core.Message, tracingHooks *tracing.Hooks, commit bool, callFromPrecompile bool, cfg *statedb.EVMConfig, txConfig statedb.TxConfig, internal bool, overrides *rpctypes.StateOverride) (outcome *txCandidateResult, err error) {
+	outcome = &txCandidateResult{}
 	var (
 		ret   []byte // return bytes from evm execution
 		vmErr error  // vm errors do not effect consensus and are therefore not assigned to err
@@ -427,9 +469,14 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 		attribute.Bool("internal", internal),
 	))
 	defer func() { evmtrace.EndSpanErr(span, err) }()
+	defer func() {
+		if manager, ok := vmtracer.FromContext(ctx); ok {
+			outcome.cause = manager.ExecutionError()
+		}
+	}()
 
 	if stateDB == nil {
-		return nil, 0, types.ErrNilStateDB
+		return outcome, types.ErrNilStateDB
 	}
 	ethCfg := types.GetEthChainConfig()
 	evm, restoreCodeReader := k.newEVMWithOverridePrecompiles(ctx, msg, cfg, tracingHooks, stateDB, overrides == nil)
@@ -439,7 +486,7 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 	if overrides != nil {
 		precompiles, err := k.applyStateOverrides(ctx, stateDB, rules, overrides)
 		if err != nil {
-			return nil, 0, errorsmod.Wrap(err, "failed to apply state override")
+			return outcome, errorsmod.Wrap(err, "failed to apply state override")
 		}
 		evm.WithPrecompiles(precompiles)
 	}
@@ -471,7 +518,11 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 		}
 		txEnded = true
 		if vmCfg.Tracer != nil && vmCfg.Tracer.OnTxEnd != nil {
-			vmCfg.Tracer.OnTxEnd(&ethtypes.Receipt{GasUsed: msg.GasLimit - leftoverGas}, vmErr)
+			endErr := vmErr
+			if endErr == nil {
+				endErr = err
+			}
+			vmCfg.Tracer.OnTxEnd(&ethtypes.Receipt{GasUsed: msg.GasLimit - leftoverGas}, endErr)
 		}
 	}
 	defer finishTx()
@@ -483,21 +534,21 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 	intrinsicGas, err := k.GetEthIntrinsicGas(ctx, msg, ethCfg, contractCreation)
 	if err != nil {
 		// should have already been checked on Ante Handler
-		return nil, 0, errorsmod.Wrap(err, "intrinsic gas failed")
+		return outcome, errorsmod.Wrap(err, "intrinsic gas failed")
 	}
 
 	// Should check again even if it is checked on Ante Handler, because eth_call don't go through Ante Handler.
 	if leftoverGas < intrinsicGas {
 		// eth_estimateGas will check for this exact error
-		return nil, 0, errorsmod.Wrap(core.ErrIntrinsicGas, "apply message")
+		return outcome, errorsmod.Wrap(core.ErrIntrinsicGas, "apply message")
 	}
 	if rules.IsPrague {
 		floorDataGas, err := core.FloorDataGas(msg.Data)
 		if err != nil {
-			return nil, 0, err
+			return outcome, err
 		}
 		if msg.GasLimit < floorDataGas {
-			return nil, 0, fmt.Errorf("%w: have %d, want %d", core.ErrFloorDataGas, msg.GasLimit, floorDataGas)
+			return outcome, fmt.Errorf("%w: have %d, want %d", core.ErrFloorDataGas, msg.GasLimit, floorDataGas)
 		}
 	}
 	leftoverGas -= intrinsicGas
@@ -511,7 +562,7 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 
 	convertedValue, err := utils.Uint256FromBigInt(msg.Value)
 	if err != nil {
-		return nil, 0, err
+		return outcome, err
 	}
 
 	if contractCreation {
@@ -550,6 +601,7 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 		}
 		ret, leftoverGas, vmErr = evm.Call(sender.Address(), *msg.To, msg.Data, leftoverGas, convertedValue)
 	}
+	outcome.vmErr = vmErr
 
 	refundQuotient := params.RefundQuotient
 
@@ -564,7 +616,7 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 
 	// calculate gas refund
 	if msg.GasLimit < leftoverGas {
-		return nil, 0, errorsmod.Wrap(types.ErrGasOverflow, "apply message")
+		return outcome, errorsmod.Wrap(types.ErrGasOverflow, "apply message")
 	}
 	// refund gas
 	maxUsedGas := msg.GasLimit - leftoverGas
@@ -594,42 +646,18 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 	}
 	gasUsed, err := calculateChargedGas(msg.GasLimit, temporaryGasUsed, 0, minGasMultiplier)
 	if err != nil {
-		return nil, 0, err
+		return outcome, err
 	}
 	// reset leftoverGas, to be used by the tracingHooks
 	leftoverGas = msg.GasLimit - gasUsed
 
 	finishTx()
 
-	if manager, ok := vmtracer.FromContext(ctx); ok {
-		if executionErr := manager.ExecutionError(); executionErr != nil {
-			return &types.MsgEthereumTxResponse{
-				GasUsed:    gasUsed,
-				MaxUsedGas: maxUsedGas,
-			}, temporaryGasUsed, errorsmod.Wrap(executionErr, "EVM execution rejected")
-		}
-	}
-
-	// The dirty states in `StateDB` is either committed or discarded after return
-	if commit {
-		// In a precompile context, we never want to commit, as that will collapse the cache stack.
-		// Instead, we want to flush to the cacheCtx.
-		if callFromPrecompile {
-			if err := stateDB.FlushToCacheCtx(); err != nil {
-				return nil, 0, errorsmod.Wrap(err, "failed to flush stateDB to cacheCtx")
-			}
-		} else {
-			if err := stateDB.Commit(); err != nil {
-				return nil, 0, errorsmod.Wrap(err, "failed to commit stateDB")
-			}
-		}
-	}
-
 	// if the execution reverted, we return the revert reason as the return data
 	if vmError == vm.ErrExecutionReverted.Error() {
 		ret = evm.ReturnData()
 	}
-	return &types.MsgEthereumTxResponse{
+	outcome.response = &types.MsgEthereumTxResponse{
 		GasUsed:        gasUsed,
 		MaxUsedGas:     maxUsedGas,
 		VmError:        vmError,
@@ -638,7 +666,21 @@ func (k *Keeper) applyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 		Hash:           txConfig.TxHash.Hex(),
 		BlockHash:      ctx.HeaderHash(),
 		BlockTimestamp: evm.Context.Time,
-	}, temporaryGasUsed, nil
+	}
+	outcome.rawEVMGas = temporaryGasUsed
+	return outcome, nil
+}
+
+func commitMessageState(stateDB *statedb.StateDB, callFromPrecompile bool) error {
+	// A precompile must flush without collapsing the cache stack.
+	if callFromPrecompile {
+		if err := stateDB.FlushToCacheCtx(); err != nil {
+			return errorsmod.Wrap(err, "failed to flush stateDB to cacheCtx")
+		}
+	} else if err := stateDB.Commit(); err != nil {
+		return errorsmod.Wrap(err, "failed to commit stateDB")
+	}
+	return nil
 }
 
 // SetConsensusParamsInCtx will return the original context if consensus params already exist in it, otherwise, it will
