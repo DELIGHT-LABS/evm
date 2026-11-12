@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	ethparams "github.com/ethereum/go-ethereum/params"
@@ -994,6 +995,13 @@ func (k *Keeper) traceTx(
 	}
 	defer func() { prepared.close(err) }()
 	ctx = prepared.ctx
+	var finishPrestate func(tracing.StateDB)
+	if config.traceConfig != nil && config.traceConfig.Tracer == "prestateTracer" {
+		ctx, finishPrestate, err = k.preparePrestateTrace(ctx, config.txConfig, config.traceConfig.TracerJsonConfig, prepared.tracer)
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+	}
 	prepared.start()
 	deferred := deferRootTrace(prepared.tracer.Hooks)
 	result, err := k.runTxCandidate(ctx, txCandidateInput{msg: *msg, txType: tx.Type(), cfg: config.evmConfig, txConfig: config.txConfig, tracer: deferred.hooks})
@@ -1012,6 +1020,9 @@ func (k *Keeper) traceTx(
 		result.receipt = &ethtypes.Receipt{GasUsed: msg.GasLimit, Status: ethtypes.ReceiptStatusFailed}
 	}
 	finalState := statedb.New(ctx, k, config.txConfig)
+	if finishPrestate != nil {
+		finishPrestate(finalState)
+	}
 	deferred.finish(finalErr, output, result.receipt, finalState)
 	return prepared.result()
 }
