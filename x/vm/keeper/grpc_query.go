@@ -14,8 +14,6 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/eth/tracers"
-	"github.com/ethereum/go-ethereum/eth/tracers/logger"
 	ethparams "github.com/ethereum/go-ethereum/params"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -660,11 +658,9 @@ func (k *Keeper) prepareEstimateSenderOverrides(
 }
 
 type traceTxConfig struct {
-	evmConfig      *statedb.EVMConfig
-	txConfig       statedb.TxConfig
-	traceConfig    *types.TraceConfig
-	commit         bool
-	stateOverrides *rpctypes.StateOverride
+	evmConfig   *statedb.EVMConfig
+	txConfig    statedb.TxConfig
+	traceConfig *types.TraceConfig
 }
 
 // TraceTx configures a new tracer according to the provided configuration, and
@@ -676,6 +672,7 @@ func (k Keeper) TraceTx(c context.Context, req *types.QueryTraceTxRequest) (_ *t
 	}
 
 	ctx := sdk.UnwrapSDKContext(c)
+	ctx, _ = ctx.CacheContext()
 	ctx, span := ctx.StartSpan(tracer, "TraceTx", trace.WithAttributes(
 		attribute.Int64("block_number", req.BlockNumber),
 		attribute.String("block_hash", req.BlockHash),
@@ -748,13 +745,17 @@ func (k Keeper) TraceTx(c context.Context, req *types.QueryTraceTxRequest) (_ *t
 		txConfig.TxIndex = uint(i)
 
 		ctx = buildTraceCtx(ctx, msg.GasLimit)
-		replayCtx, tracingHooks := k.prepareTracing(ctx, *msg, txConfig, true)
-		// we ignore the error here. this endpoint, ideally, is called internally from the ETH backend, which will call this query
-		// using all previous txs in the trace transaction's block. some of those _could_ be invalid transactions.
-		stateDB := statedb.New(replayCtx, &k, txConfig)
-		rsp, _ := k.ApplyMessageWithConfig(replayCtx, stateDB, *msg, tracingHooks, true, false, cfg, txConfig, false, nil)
-		if rsp != nil {
-			ctx.GasMeter().ConsumeGas(rsp.GasUsed, "evm predecessor tx")
+		candidate, replayErr := k.runTxCandidate(ctx, txCandidateInput{msg: *msg, txType: ethTx.Type(), cfg: cfg, txConfig: txConfig})
+		if replayErr != nil {
+			if !invalidPredecessorError(replayErr) {
+				return nil, status.Error(codes.Internal, replayErr.Error())
+			}
+			if candidate != nil && candidate.cause != nil {
+				return nil, status.Error(codes.Internal, candidate.cause.Error())
+			}
+		}
+		if candidate != nil && candidate.response != nil {
+			ctx.GasMeter().ConsumeGas(candidate.response.GasUsed, "evm predecessor tx")
 		}
 	}
 
@@ -793,6 +794,7 @@ func (k Keeper) TraceBlock(c context.Context, req *types.QueryTraceBlockRequest)
 	}
 
 	ctx := sdk.UnwrapSDKContext(c)
+	ctx, _ = ctx.CacheContext()
 	ctx, span := ctx.StartSpan(tracer, "TraceBlock", trace.WithAttributes(
 		attribute.Int64("block_number", req.BlockNumber),
 		attribute.String("block_hash", req.BlockHash),
@@ -847,7 +849,6 @@ func (k Keeper) TraceBlock(c context.Context, req *types.QueryTraceBlockRequest)
 			evmConfig:   cfg,
 			txConfig:    txConfig,
 			traceConfig: req.TraceConfig,
-			commit:      true,
 		})
 		if err != nil {
 			result.Error = err.Error()
@@ -940,15 +941,24 @@ func (k Keeper) TraceCall(c context.Context, req *types.QueryTraceCallRequest) (
 		}
 	}
 
-	// trace call
-	result, err := k.traceTxWithMsg(ctx, msg, traceTxConfig{
-		evmConfig:      cfg,
-		txConfig:       txConfig,
-		traceConfig:    req.GetTraceConfig(),
-		stateOverrides: overrides,
+	prepared, err := prepareQueryTrace(ctx, msg, traceTxConfig{
+		evmConfig:   cfg,
+		txConfig:    txConfig,
+		traceConfig: req.GetTraceConfig(),
 	})
 	if err != nil {
-		// error will be returned with detail status from traceTx
+		return nil, err
+	}
+	defer func() { prepared.close(err) }()
+	prepared.start()
+
+	ctx, hooks := k.prepareTracingWithBase(prepared.ctx, *msg, txConfig, false, prepared.tracer.Hooks)
+	stateDB := statedb.New(ctx, &k, txConfig)
+	if _, err = k.ApplyMessageWithConfig(ctx, stateDB, *msg, hooks, false, false, cfg, txConfig, false, overrides); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	result, err := prepared.result()
+	if err != nil {
 		return nil, err
 	}
 
@@ -978,111 +988,32 @@ func (k *Keeper) traceTx(
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return k.traceTxWithMsg(ctx, msg, config)
-}
-
-// traceTxWithMsg do trace on one Ethereum message, it returns a tuple: (traceResult, error).
-func (k *Keeper) traceTxWithMsg(
-	ctx sdk.Context,
-	msg *core.Message,
-	config traceTxConfig,
-) (_ *any, err error) {
-	txConfig := config.txConfig
-	traceConfig := config.traceConfig
-	if traceConfig == nil {
-		traceConfig = &types.TraceConfig{}
+	prepared, err := prepareQueryTrace(ctx, msg, config)
+	if err != nil {
+		return nil, err
 	}
-
-	ctx, span := ctx.StartSpan(tracer, "traceTxWithMsg", trace.WithAttributes(
-		attribute.String("tx_hash", txConfig.TxHash.Hex()),
-		attribute.Int("tx_index", int(txConfig.TxIndex)),
-		attribute.String("from", msg.From.Hex()),
-	))
-	defer func() { evmtrace.EndSpanErr(span, err) }()
-	// Assemble the structured logger or the JavaScript tracer
-	var (
-		tracer           *tracers.Tracer
-		chainOverrides   *ethparams.ChainConfig
-		jsonTracerConfig json.RawMessage
-		timeout          = defaultTraceTimeout
-	)
-
-	if traceConfig.TracerJsonConfig != "" {
-		// ignore error. default to no traceConfig
-		_ = json.Unmarshal([]byte(traceConfig.TracerJsonConfig), &jsonTracerConfig)
-	}
-
-	if traceConfig.Overrides != nil {
-		chainOverrides = traceConfig.Overrides.EthereumConfig(types.GetEthChainConfig().ChainID)
-	}
-
-	logConfig := logger.Config{
-		EnableMemory:     traceConfig.EnableMemory,
-		DisableStorage:   traceConfig.DisableStorage,
-		DisableStack:     traceConfig.DisableStack,
-		EnableReturnData: traceConfig.EnableReturnData,
-		Limit:            int(traceConfig.Limit),
-		Overrides:        chainOverrides,
-	}
-
-	sLogger := logger.NewStructLogger(&logConfig)
-	tracer = &tracers.Tracer{
-		Hooks:     sLogger.Hooks(),
-		GetResult: sLogger.GetResult,
-		Stop:      sLogger.Stop,
-	}
-
-	tCtx := &tracers.Context{
-		BlockHash: common.BytesToHash(ctx.HeaderHash()),
-		TxIndex:   int(txConfig.TxIndex), //#nosec G115 -- int overflow is not a concern here
-		TxHash:    txConfig.TxHash,
-	}
-
-	if traceConfig.Tracer != "" {
-		var cfg json.RawMessage
-		if traceConfig.TracerJsonConfig != "" {
-			cfg = json.RawMessage(traceConfig.TracerJsonConfig)
-		}
-		if tracer, err = tracers.DefaultDirectory.New(traceConfig.Tracer, tCtx, cfg,
-			types.GetEthChainConfig()); err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
-	}
-
-	// Define a meaningful timeout of a single transaction trace
-	if traceConfig.Timeout != "" {
-		if timeout, err = time.ParseDuration(traceConfig.Timeout); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "timeout value: %s", err.Error())
-		}
-	}
-
-	// Handle timeouts and RPC cancellations
-	deadlineCtx, cancel := context.WithTimeout(ctx.Context(), timeout)
-	defer cancel()
-
-	go func() {
-		<-deadlineCtx.Done()
-		if errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) {
-			tracer.Stop(errors.New("execution timeout"))
-		}
-	}()
-
-	// Build EVM execution context
-	ctx = buildTraceCtx(ctx, msg.GasLimit)
-	ctx, tracingHooks := k.prepareTracingWithBase(ctx, *msg, txConfig, config.commit, tracer.Hooks)
-	stateDB := statedb.New(ctx, k, txConfig)
-	_, err = k.ApplyMessageWithConfig(ctx, stateDB, *msg, tracingHooks, config.commit, false, config.evmConfig, txConfig, false, config.stateOverrides)
+	defer func() { prepared.close(err) }()
+	ctx = prepared.ctx
+	prepared.start()
+	deferred := deferRootTrace(prepared.tracer.Hooks)
+	result, err := k.runTxCandidate(ctx, txCandidateInput{msg: *msg, txType: tx.Type(), cfg: config.evmConfig, txConfig: config.txConfig, tracer: deferred.hooks})
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-
-	var result interface{}
-	result, err = tracer.GetResult()
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+	var finalErr error
+	var output []byte
+	if result.hookFailed {
+		finalErr, output = result.hookVMErr, result.response.Ret
 	}
-
-	return &result, nil
+	if result.outOfGas {
+		finalErr, output = vm.ErrOutOfGas, nil
+	}
+	if result.outOfGas && result.receipt == nil {
+		result.receipt = &ethtypes.Receipt{GasUsed: msg.GasLimit, Status: ethtypes.ReceiptStatusFailed}
+	}
+	finalState := statedb.New(ctx, k, config.txConfig)
+	deferred.finish(finalErr, output, result.receipt, finalState)
+	return prepared.result()
 }
 
 // BaseFee implements the Query/BaseFee gRPC method
