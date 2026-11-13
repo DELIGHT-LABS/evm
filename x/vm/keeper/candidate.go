@@ -7,10 +7,12 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 
+	precompilecommon "github.com/cosmos/evm/precompiles/common"
 	rpctypes "github.com/cosmos/evm/rpc/types"
 	"github.com/cosmos/evm/x/vm/statedb"
 	"github.com/cosmos/evm/x/vm/types"
@@ -27,8 +29,11 @@ type txCandidateInput struct {
 	txConfig  statedb.TxConfig
 	overrides *rpctypes.StateOverride
 	simulate  bool
+	tracer    *tracing.Hooks
 }
 
+// txCandidateResult holds EVM execution results, extended with receipt and hook
+// data during transaction processing.
 type txCandidateResult struct {
 	response   *types.MsgEthereumTxResponse
 	receipt    *ethtypes.Receipt
@@ -37,6 +42,9 @@ type txCandidateResult struct {
 	chargedGas uint64
 	outOfGas   bool
 	hookFailed bool
+	hookVMErr  error
+	cause      error
+	vmErr      error // Original VM error, before transaction post-processing.
 }
 
 func (r *txCandidateResult) setChargedGas(gas uint64) {
@@ -58,28 +66,16 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	// Didn't use `Snapshot` because the context stack has exponential complexity on certain operations,
 	// thus restricted to be used only inside `ApplyMessage`.
 	candidateCtx, commitCandidate := parentCtx.CacheContext()
-	var observed *txCandidateResult
-	defer func() {
-		if observed != nil && !input.simulate && (observed.hookFailed || observed.outOfGas) {
-			k.Logger(parentCtx).Error(
-				"tx post processing failed",
-				"tx_hash", input.txConfig.TxHash.Hex(),
-				"tx_type", input.txType,
-				"tx_index", input.txConfig.TxIndex,
-				"evm_raw_gas_used", observed.rawEVMGas,
-				"post_hook_gas_used", observed.hookGas,
-				"charged_gas_used", observed.chargedGas,
-				"gas_limit", input.msg.GasLimit,
-				"out_of_gas", observed.outOfGas,
-			)
-		}
-	}()
 	evmCtx := buildTraceCtx(candidateCtx, input.msg.GasLimit)
 
-	evmCtx, tracingHooks := k.prepareTracing(evmCtx, input.msg, input.txConfig, !input.simulate)
-	// pass true to commit the StateDB
+	var tracingHooks *tracing.Hooks
+	if input.tracer != nil {
+		evmCtx, tracingHooks = k.prepareTracingWithBase(evmCtx, input.msg, input.txConfig, !input.simulate, input.tracer)
+	} else {
+		evmCtx, tracingHooks = k.prepareTracing(evmCtx, input.msg, input.txConfig, !input.simulate)
+	}
 	stateDB := statedb.New(evmCtx, k, input.txConfig)
-	response, rawEVMGas, err := k.applyMessageWithConfig(
+	result, err := k.executeMessageWithConfig(
 		evmCtx,
 		stateDB,
 		input.msg,
@@ -92,17 +88,18 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 		input.overrides,
 	)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
-
-	result := &txCandidateResult{
-		response:  response,
-		rawEVMGas: rawEVMGas,
-	}
-	observed = result
-	if response == nil {
+	if result.response == nil {
 		return nil, fmt.Errorf("EVM execution returned no response")
 	}
+	if result.cause != nil && !types.IsHandledExecutionError(result.cause) {
+		return result, errorsmod.Wrap(result.cause, "EVM execution rejected")
+	}
+	if err := commitMessageState(stateDB, false); err != nil {
+		return result, err
+	}
+	response := result.response
 	if result.rawEVMGas > input.msg.GasLimit {
 		result.outOfGas = true
 		result.setChargedGas(input.msg.GasLimit)
@@ -140,7 +137,7 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 		return result, nil
 	case hookErr != nil:
 		result.hookFailed = true
-		markHookError(response, receipt, hookErr)
+		result.hookVMErr = markHookError(response, receipt, hookErr)
 	}
 
 	chargedGas, err := calculateChargedGas(
@@ -205,16 +202,18 @@ func newCandidateReceipt(parentCtx sdk.Context, input txCandidateInput, response
 	return receipt
 }
 
-func markHookError(response *types.MsgEthereumTxResponse, receipt *ethtypes.Receipt, hookErr error) {
+func markHookError(response *types.MsgEthereumTxResponse, receipt *ethtypes.Receipt, hookErr error) error {
 	// If hooks returns an error, revert the whole tx.
 	// If the error carries revert data (ABI-encoded custom error),
 	// propagate it so clients can decode the reason.
-	var revertData interface{ RevertData() []byte }
+	var revertData precompilecommon.RevertDataCarrier
 	if errors.As(hookErr, &revertData) {
 		markHookFailure(response, receipt, vm.ErrExecutionReverted.Error(), revertData.RevertData())
-		return
+		return vm.ErrExecutionReverted
 	}
-	markHookFailure(response, receipt, errorsmod.Wrap(hookErr, "failed to execute post transaction processing").Error(), nil)
+	vmErr := errorsmod.Wrap(hookErr, "failed to execute post transaction processing")
+	markHookFailure(response, receipt, vmErr.Error(), nil)
+	return vmErr
 }
 
 func markHookFailure(response *types.MsgEthereumTxResponse, receipt *ethtypes.Receipt, vmError string, revertData []byte) {

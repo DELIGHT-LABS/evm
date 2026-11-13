@@ -102,6 +102,9 @@ func (s *KeeperTestSuite) TestQueryPathsProvideSessionTracerManager() {
 				params := k.GetParams(ctx)
 				params.ActiveStaticPrecompiles = append(params.ActiveStaticPrecompiles, address.String())
 				s.Require().NoError(k.SetParams(ctx, params))
+				state := s.Network.GetStateDB()
+				state.SetCode(precompile.target, common.FromHex("0x600160005500"), tracing.CodeChangeUnspecified)
+				s.Require().NoError(state.Commit())
 
 				var managers []*vmtracer.Manager
 				var executions []vmtracer.ExecutionInfo
@@ -217,6 +220,7 @@ func (s *KeeperTestSuite) TestQueryPathsProvideSessionTracerManager() {
 					s.Require().Len(result.Calls, 1)
 					s.Require().Equal(precompile.target, result.Calls[0].To)
 				}
+				s.Require().Equal(common.Hash{}, k.GetState(ctx, precompile.target, common.Hash{}), "query execution must not publish its SSTORE")
 				s.Require().Equal(expectedExecutions, precompile.enterCalls)
 				s.Require().Len(precompile.managers, expectedExecutions)
 				seen := make(map[*vmtracer.Manager]bool)
@@ -242,7 +246,9 @@ func (s *KeeperTestSuite) TestQueryPathsProvideSessionTracerManager() {
 					s.Require().Equal(len(managers), starts)
 					s.Require().Equal(starts, ends)
 					for i, execution := range executions {
-						expectedCommit := path == "TraceBlock" || path == "TraceTxPredecessor" && i == 0
+						// Historical replay commits into the query-owned cache;
+						// call and gas-estimation simulations remain read-only.
+						expectedCommit := path == "TraceTx" || path == "TraceTxPredecessor" || path == "TraceBlock"
 						s.Require().Equal(expectedCommit, execution.Commit)
 						if expectedExecutions == 2 && path != "EstimateGas" {
 							s.Require().Equal(uint64(i), execution.TxIndex)
