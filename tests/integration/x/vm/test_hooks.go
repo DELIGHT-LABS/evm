@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 
 	"github.com/cosmos/evm/contracts"
 	"github.com/cosmos/evm/x/vm/keeper"
@@ -18,6 +19,7 @@ import (
 
 	sdkmath "cosmossdk.io/math"
 
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
@@ -194,7 +196,8 @@ func (s *KeeperTestSuite) TestPostTxProcessingFailureLogReversion() {
 	s.SetupTest()
 
 	// Set up the failing hook
-	hook := &FailureHook{}
+	revertData := []byte{0xde, 0xad, 0xbe, 0xef}
+	hook := RevertHook{Data: revertData}
 	s.Network.App.GetEVMKeeper().SetHooks(keeper.NewMultiEvmHooks(hook))
 
 	k := s.Network.App.GetEVMKeeper()
@@ -228,7 +231,8 @@ func (s *KeeperTestSuite) TestPostTxProcessingFailureLogReversion() {
 	s.Require().NoError(err, "EthereumTx should not return error")
 	s.Require().NotNil(res)
 	s.Require().NotEmpty(res.VmError, "Should have VmError due to PostTxProcessing failure")
-	s.Require().Contains(res.VmError, "failed to execute post transaction processing")
+	s.Require().Equal(vm.ErrExecutionReverted.Error(), res.VmError)
+	s.Require().Equal(revertData, res.Ret)
 
 	// Critical test: Verify logs are completely cleared
 	s.Require().Nil(res.Logs, "res.Logs should be nil after PostTxProcessing failure")
@@ -249,4 +253,72 @@ func (s *KeeperTestSuite) TestPostTxProcessingFailureLogReversion() {
 	}
 	s.Require().Equal(fmt.Sprintf("%d", res.GasUsed), gasUsed)
 	s.Require().Equal(res.VmError, failure)
+}
+
+func (s *KeeperTestSuite) TestPostTxProcessingPlainErrorRejects() {
+	for _, tc := range []struct {
+		name          string
+		messageServer bool
+	}{
+		{name: "ApplyTransaction"},
+		{name: "EthereumTx", messageServer: true},
+	} {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			k := s.Network.App.GetEVMKeeper()
+			bank := s.Network.App.GetBankKeeper()
+			ctx := s.Network.GetContext()
+			baseDenom := types.GetEVMCoinDenom()
+			sender := s.Keyring.GetKey(0)
+			recipient := s.Keyring.GetAddr(1)
+			moduleAddr := s.Network.App.GetAccountKeeper().GetModuleAddress(types.ModuleName)
+			feeCollector := s.Network.App.GetAccountKeeper().GetModuleAddress("fee_collector")
+			feeCoins := sdk.NewCoins(sdk.NewInt64Coin(baseDenom, 1e18))
+			s.Require().NoError(bank.MintCoins(ctx, "mint", feeCoins))
+			s.Require().NoError(bank.SendCoinsFromModuleToModule(ctx, "mint", "fee_collector", feeCoins))
+			s.Require().NoError(bank.SendCoinsFromAccountToModuleVirtual(ctx, feeCollector, "fee_collector", feeCoins))
+			senderBefore := bank.GetBalance(ctx, sender.AccAddr, baseDenom)
+			recipientBefore := bank.GetBalance(ctx, recipient.Bytes(), baseDenom)
+			feesBefore := bank.GetBalance(ctx, feeCollector, baseDenom)
+			gasBefore := k.GetTransientGasUsed(ctx)
+			eventsBefore := ctx.EventManager().Events()
+
+			const mintedDenom = "ahookreject"
+			cause := errors.New("post tx hook unavailable")
+			k.SetHooks(keeper.NewMultiEvmHooks(&testHooks{
+				postProcessing: func(hookCtx sdk.Context, _ common.Address, _ core.Message, _ *ethtypes.Receipt) error {
+					s.Require().NoError(bank.MintCoins(hookCtx, types.ModuleName, sdk.NewCoins(sdk.NewInt64Coin(mintedDenom, 1))))
+					hookCtx.EventManager().EmitEvent(sdk.NewEvent(TestPostProcessingEventType))
+					return cause
+				},
+			}))
+			tx, err := s.Factory.GenerateSignedEthTx(sender.Priv, types.EvmTxArgs{
+				To:       &recipient,
+				Amount:   big.NewInt(100),
+				GasLimit: 100_000,
+				GasPrice: big.NewInt(1_000_000_000),
+			})
+			s.Require().NoError(err)
+			msg := tx.GetMsgs()[0].(*types.MsgEthereumTx)
+			ctx = ctx.WithGasMeter(storetypes.NewGasMeter(200_000))
+
+			var response *types.MsgEthereumTxResponse
+			if tc.messageServer {
+				response, err = k.EthereumTx(ctx, msg)
+			} else {
+				response, err = k.ApplyTransaction(ctx, msg.AsTransaction())
+			}
+			s.Require().ErrorIs(err, cause)
+			s.Require().ErrorContains(err, "EVM execution rejected")
+			s.Require().Nil(response)
+			s.Require().Equal(uint64(200_000), ctx.GasMeter().GasConsumed())
+			ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
+			s.Require().Equal(gasBefore, k.GetTransientGasUsed(ctx))
+			s.Require().Equal(senderBefore, bank.GetBalance(ctx, sender.AccAddr, baseDenom))
+			s.Require().Equal(recipientBefore, bank.GetBalance(ctx, recipient.Bytes(), baseDenom))
+			s.Require().Equal(feesBefore, bank.GetBalance(ctx, feeCollector, baseDenom))
+			s.Require().True(bank.GetBalance(ctx, moduleAddr, mintedDenom).IsZero())
+			s.Require().Equal(eventsBefore, ctx.EventManager().Events())
+		})
+	}
 }
