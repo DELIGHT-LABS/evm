@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	evmtypes "github.com/cosmos/evm/x/vm/types"
+
 	"github.com/cosmos/cosmos-sdk/types/query"
 )
 
@@ -36,7 +38,7 @@ func TestPageRequestFromArg(t *testing.T) {
 
 	t.Run("invalid tuple returns shared Solidity error", func(t *testing.T) {
 		_, err := PageRequestFromArg(SharedErrorABI, "validators", 1, "bad-page")
-		var carrier RevertDataCarrier
+		var carrier evmtypes.RevertDataCarrier
 		require.ErrorAs(t, err, &carrier)
 
 		data := carrier.RevertData()

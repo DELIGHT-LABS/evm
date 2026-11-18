@@ -132,7 +132,7 @@ func TestLocalQueryErrorCaptureIgnoresNilResultAndIsRequestScoped(t *testing.T) 
 func TestLocalQueryErrorCaptureOwnsRevertData(t *testing.T) {
 	ctx := WithQueryErrorCapture(context.Background())
 	source := common.NewRevertWithSolidityError(common.SharedErrorABI, common.SolidityErrSDKInsufficientFunds)
-	var carrier common.RevertDataCarrier
+	var carrier evmtypes.RevertDataCarrier
 	require.ErrorAs(t, source, &carrier)
 	want := append([]byte(nil), carrier.RevertData()...)
 	require.Same(t, source, QueryError(ctx, source))

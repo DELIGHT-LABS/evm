@@ -9,6 +9,7 @@ import (
 
 	cmn "github.com/cosmos/evm/precompiles/common"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
 
@@ -28,7 +29,7 @@ func TestTranslateSlashingRegisteredErrorsDirectAndWrapped(t *testing.T) {
 		fmt.Errorf("standard wrapper: %w", slashingtypes.ErrValidatorNotJailed),
 	} {
 		err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UnjailMethod, returned, nil).Err
-		carrier := err.(cmn.RevertDataCarrier)
+		carrier := err.(evmtypes.RevertDataCarrier)
 		require.Equal(t, slashingErrorSelector(SolidityErrSlashingValidatorNotJailed), carrier.RevertData())
 		require.NotEqual(t, slashingErrorSelector(cmn.SolidityErrMsgServerFailed), carrier.RevertData()[:4])
 		require.NotEqual(t, slashingErrorSelector(cmn.SolidityErrUnmappedCosmosError), carrier.RevertData()[:4])
@@ -40,17 +41,17 @@ func TestSlashingUnregisteredFailuresKeepInternalErrors(t *testing.T) {
 	internal := errors.New("infrastructure failure")
 
 	msgErr := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UnjailMethod, internal, nil).Err
-	require.Equal(t, slashingErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, slashingErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 
 	queryErr := cosmosErrorRegistry.ResolveQueryError(p.ABI, GetParamsMethod, internal, nil).Err
-	require.Equal(t, slashingErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, slashingErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestSlashingUnmappedReturnsUnmappedRevert(t *testing.T) {
 	p := Precompile{ABI: ABI}
 
 	err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UnjailMethod, errSyntheticSlashingDrift, nil).Err
-	require.Equal(t, slashingErrorSelector(cmn.SolidityErrUnmappedCosmosError), err.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, slashingErrorSelector(cmn.SolidityErrUnmappedCosmosError), err.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func slashingErrorSelector(name string) []byte {

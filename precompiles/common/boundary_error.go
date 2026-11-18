@@ -6,6 +6,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/core/vm"
+
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 )
 
 // ErrorResolution preserves Cosmos classification for caller-owned logging.
@@ -117,6 +119,6 @@ func NeedsErrorTranslation(err error) bool {
 	if err == nil || errors.Is(err, vm.ErrOutOfGas) {
 		return false
 	}
-	var carrier RevertDataCarrier
+	var carrier evmtypes.RevertDataCarrier
 	return !errors.As(err, &carrier)
 }

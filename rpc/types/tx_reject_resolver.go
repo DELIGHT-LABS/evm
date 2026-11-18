@@ -79,7 +79,7 @@ func ResolveTxRejectError(original error, translators ...func(error) (bool, erro
 		return original
 	}
 	var dataError rpc.DataError
-	var carrier common.RevertDataCarrier
+	var carrier evmtypes.RevertDataCarrier
 	hasCarrier := errors.As(original, &carrier)
 	if errors.As(original, &dataError) || hasCarrier {
 		var data []byte
@@ -150,7 +150,7 @@ func encodeTxRejectError(original error, api abi.ABI, name string, args ...inter
 // canonical encoding of the expected custom error counts as a new mapping.
 // Pre-existing carriers bypass this check and retain their bytes verbatim.
 func checkedTxRejectError(original, encoded error, expected abi.Error) error {
-	var carrier common.RevertDataCarrier
+	var carrier evmtypes.RevertDataCarrier
 	if !errors.As(encoded, &carrier) {
 		return original
 	}

@@ -180,3 +180,53 @@ func (e *RevertError) RevertData() []byte {
 	}
 	return common.CopyBytes(e.revertBytes)
 }
+
+// MultiErrorUnwrapper exposes multiple underlying errors.
+type MultiErrorUnwrapper interface {
+	error
+	Unwrap() []error
+}
+
+// RevertDataCarrier is an error that carries ABI-encoded revert data.
+type RevertDataCarrier interface {
+	error
+	RevertData() []byte
+}
+
+// RevertWithData owns revert bytes and returns a copy from RevertData.
+type RevertWithData struct {
+	data []byte
+}
+
+func (e *RevertWithData) Error() string {
+	return "execution reverted"
+}
+
+func (e *RevertWithData) RevertData() []byte {
+	return common.CopyBytes(e.data)
+}
+
+// NewRevertData creates a RevertDataCarrier holding a copy of the non-empty bytes.
+// If data is empty, it returns nil.
+func NewRevertData(data []byte) RevertDataCarrier {
+	if len(data) == 0 {
+		return nil
+	}
+	return &RevertWithData{data: common.CopyBytes(data)}
+}
+
+// DomainRevertData returns non-empty revert data from err's own RevertDataCarrier
+// or one along its single-error unwrap chain. Empty carriers and multi-error
+// joins stop traversal; joins with their own non-empty carrier are accepted.
+func DomainRevertData(err error) ([]byte, bool) {
+	for curr := err; curr != nil; curr = errors.Unwrap(curr) {
+		if carrier, ok := curr.(RevertDataCarrier); ok {
+			data := carrier.RevertData()
+			if len(data) == 0 {
+				return nil, false
+			}
+			return common.CopyBytes(data), true
+		}
+	}
+	return nil, false
+}

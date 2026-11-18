@@ -276,7 +276,7 @@ func TestResolveTxRejectErrorIdempotence(t *testing.T) {
 	resolved := resolveTxRejectError(wrapped)
 	require.ErrorIs(t, resolved, core.ErrNonceTooLow)
 	require.Same(t, wrapped, errors.Unwrap(resolved))
-	require.Equal(t, data, resolved.(precompilecommon.RevertDataCarrier).RevertData())
+	require.Equal(t, data, resolved.(evmtypes.RevertDataCarrier).RevertData())
 }
 
 func setupTxRejectDefaultsBackend(t *testing.T) (*Backend, *admissionMempool) {

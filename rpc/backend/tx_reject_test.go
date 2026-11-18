@@ -86,7 +86,7 @@ func TestAdmissionMappings(t *testing.T) {
 		got := resolveTxRejectError(original)
 		require.ErrorIs(t, got, sdkerrors.ErrInvalidSequence)
 		definition := common.SharedErrorABI.Errors[common.SolidityErrUnmappedCosmosError]
-		data := got.(common.RevertDataCarrier).RevertData()
+		data := got.(evmtypes.RevertDataCarrier).RevertData()
 		require.Equal(t, definition.ID[:4], data[:4])
 		args, err := definition.Inputs.Unpack(data[4:])
 		require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestAdmissionMappings(t *testing.T) {
 		require.ErrorAs(t, got, &typed)
 		require.Same(t, original, typed)
 		definition := common.SharedErrorABI.Errors[common.SolidityErrChainIdMismatch]
-		args, err := definition.Inputs.Unpack(got.(common.RevertDataCarrier).RevertData()[4:])
+		args, err := definition.Inputs.Unpack(got.(evmtypes.RevertDataCarrier).RevertData()[4:])
 		require.NoError(t, err)
 		require.Equal(t, []interface{}{original.Expected, original.Actual}, args)
 	})
@@ -110,7 +110,7 @@ func TestAdmissionMappings(t *testing.T) {
 		require.ErrorIs(t, got, sdkerrors.ErrUnauthorized)
 		require.Same(t, original, errors.Unwrap(got))
 		definition := common.SharedErrorABI.Errors[common.SolidityErrNonceTooLow]
-		require.Equal(t, definition.ID[:4], got.(common.RevertDataCarrier).RevertData())
+		require.Equal(t, definition.ID[:4], got.(evmtypes.RevertDataCarrier).RevertData())
 	})
 	t.Run("chain ID mapping precedes Cosmos mapping", func(t *testing.T) {
 		chainID := evmtypes.NewChainIDMismatchError(big.NewInt(9000), big.NewInt(9001))
@@ -120,7 +120,7 @@ func TestAdmissionMappings(t *testing.T) {
 		require.ErrorIs(t, got, sdkerrors.ErrUnauthorized)
 		require.Same(t, original, errors.Unwrap(got))
 		definition := common.SharedErrorABI.Errors[common.SolidityErrChainIdMismatch]
-		data := got.(common.RevertDataCarrier).RevertData()
+		data := got.(evmtypes.RevertDataCarrier).RevertData()
 		require.Equal(t, definition.ID[:4], data[:4])
 		args, err := definition.Inputs.Unpack(data[4:])
 		require.NoError(t, err)
@@ -169,7 +169,7 @@ func TestAdmissionPreservesTerminalAndInfrastructure(t *testing.T) {
 	wrapped := fmt.Errorf("downstream: %w", fallback)
 	got := resolveTxRejectError(wrapped)
 	require.ErrorIs(t, got, fallback)
-	require.Equal(t, fallback.(common.RevertDataCarrier).RevertData(), got.(common.RevertDataCarrier).RevertData())
+	require.Equal(t, fallback.(evmtypes.RevertDataCarrier).RevertData(), got.(evmtypes.RevertDataCarrier).RevertData())
 }
 
 type admissionMempool struct {
@@ -249,7 +249,7 @@ func TestSendRawTransactionAdmissionTransport(t *testing.T) {
 		{name: "existing revert wins", raw: valid, poolErr: existing, code: 3, data: "0xdeadbeef", inserts: 1},
 		{name: "existing object data", raw: valid, poolErr: objectData, code: 3, data: map[string]interface{}{"reason": "existing"}, inserts: 1},
 		{name: "existing nil data", raw: valid, poolErr: &admissionRPCError{cause: synthetic}, code: 3, inserts: 1},
-		{name: "existing Error string", raw: valid, poolErr: fmt.Errorf("domain: %w", stringFallback), code: -32000, data: hexutil.Encode(stringFallback.(common.RevertDataCarrier).RevertData()), inserts: 1},
+		{name: "existing Error string", raw: valid, poolErr: fmt.Errorf("domain: %w", stringFallback), code: -32000, data: hexutil.Encode(stringFallback.(evmtypes.RevertDataCarrier).RevertData()), inserts: 1},
 		{name: "existing code", raw: valid, poolErr: &admissionCodeError{error: core.ErrNonceTooLow}, custom: common.SolidityErrNonceTooLow, code: -32042, inserts: 1},
 		{name: "success", raw: valid, inserts: 1},
 	}

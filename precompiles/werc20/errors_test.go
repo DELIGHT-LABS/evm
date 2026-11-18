@@ -9,6 +9,7 @@ import (
 	cmn "github.com/cosmos/evm/precompiles/common"
 	erc20 "github.com/cosmos/evm/precompiles/erc20"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
 
@@ -23,13 +24,13 @@ func TestWERC20UnmappedReturnsUnmappedRevert(t *testing.T) {
 	p := Precompile{Precompile: &erc20.Precompile{ABI: ABI}}
 
 	err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, WithdrawMethod, errSyntheticWERC20Drift, nil).Err
-	carrier := err.(cmn.RevertDataCarrier)
+	carrier := err.(evmtypes.RevertDataCarrier)
 	unmappedDefinition := ABI.Errors[cmn.SolidityErrUnmappedCosmosError]
 	require.Equal(t, unmappedDefinition.ID[:4], carrier.RevertData()[:4])
 
 	known := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, WithdrawMethod, banktypes.ErrSendDisabled, nil).Err
 	knownDefinition := ABI.Errors[erc20.SolidityErrBankSendDisabled]
-	require.Equal(t, knownDefinition.ID[:4], known.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, knownDefinition.ID[:4], known.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestWERC20WrappedBankSentinelReturnsConcreteParsedError(t *testing.T) {
@@ -37,8 +38,8 @@ func TestWERC20WrappedBankSentinelReturnsConcreteParsedError(t *testing.T) {
 	wrapped := errorsmod.Wrap(banktypes.ErrSendDisabled, "changed bank wrapper text")
 
 	err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, DepositMethod, wrapped, nil).Err
-	data := err.(cmn.RevertDataCarrier).RevertData()
-	expected := cmn.NewRevertWithSolidityError(ABI, erc20.SolidityErrBankSendDisabled).(cmn.RevertDataCarrier).RevertData()
+	data := err.(evmtypes.RevertDataCarrier).RevertData()
+	expected := cmn.NewRevertWithSolidityError(ABI, erc20.SolidityErrBankSendDisabled).(evmtypes.RevertDataCarrier).RevertData()
 	require.Equal(t, expected, data)
 
 	var selector [4]byte

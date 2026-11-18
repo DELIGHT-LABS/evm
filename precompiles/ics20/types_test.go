@@ -10,6 +10,7 @@ import (
 
 	cmn "github.com/cosmos/evm/precompiles/common"
 	"github.com/cosmos/evm/precompiles/testutil"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 	transfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
 	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
 	ibcerrors "github.com/cosmos/ibc-go/v11/modules/core/errors"
@@ -165,7 +166,7 @@ func TestNewMsgTransferCoinValidationErrors(t *testing.T) {
 			payload, packErr := definition.Inputs.Pack(wantArgs...)
 			require.NoError(t, packErr)
 			expected := append(append([]byte{}, definition.ID[:4]...), payload...)
-			require.Equal(t, expected, err.(cmn.RevertDataCarrier).RevertData())
+			require.Equal(t, expected, err.(evmtypes.RevertDataCarrier).RevertData())
 			if tc.want == SolidityErrIBCTransferInvalidAmount || tc.want == SolidityErrIBCTransferInvalidDenom {
 				_, raw := CreateAndValidateMsgTransfer("transfer", channel, sdk.Coin{Denom: tc.denom, Amount: sdkmath.NewInt(tc.amount)}, receiver, recipient, height, 0, memo)
 				require.ErrorIs(t, raw, ibcerrors.ErrInvalidCoins, "the exported raw validation helper retains its SDK error contract")

@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	cmn "github.com/cosmos/evm/precompiles/common"
 	callbackstypes "github.com/cosmos/evm/x/ibc/callbacks/types"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdktestutil "github.com/cosmos/cosmos-sdk/testutil"
@@ -20,6 +20,6 @@ func TestTransfer_BlockedDuringSourceCallbackExecution(t *testing.T) {
 	p := &Precompile{ABI: ABI}
 	_, err := p.Transfer(ctx, nil, nil, nil, nil)
 	require.Error(t, err)
-	require.Equal(t, ics20ErrorSelector(SolidityErrIBCCallbacksNestedSourceTransfer), err.(cmn.RevertDataCarrier).RevertData())
+	require.Equal(t, ics20ErrorSelector(SolidityErrIBCCallbacksNestedSourceTransfer), err.(evmtypes.RevertDataCarrier).RevertData())
 	assertICS20NotFallback(t, err)
 }

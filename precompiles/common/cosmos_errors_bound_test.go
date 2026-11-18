@@ -8,6 +8,8 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/stretchr/testify/require"
 
+	evmtypes "github.com/cosmos/evm/x/vm/types"
+
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
 
@@ -20,9 +22,9 @@ func TestCosmosRegistryUsesCallerABI(t *testing.T) {
 	callerABI := mustTestABI(t, msgServerErrorABIJSON)
 	callerABI.Errors["PrecompileFailure"] = callerABI.Errors["AFailure"]
 	callerResult := registry.ResolveError(callerABI, errMsgServerSynthetic, nil, nil)
-	require.Equal(t, errorSelector(callerABI, "AFailure"), callerResult.Err.(RevertDataCarrier).RevertData())
+	require.Equal(t, errorSelector(callerABI, "AFailure"), callerResult.Err.(evmtypes.RevertDataCarrier).RevertData())
 	require.Equal(t, MappingKindPrecompile, callerResult.Translation.Kind)
-	require.Equal(t, errorSelector(api, "PrecompileFailure"), registry.ResolveError(api, errMsgServerSynthetic, nil, nil).Err.(RevertDataCarrier).RevertData())
+	require.Equal(t, errorSelector(api, "PrecompileFailure"), registry.ResolveError(api, errMsgServerSynthetic, nil, nil).Err.(evmtypes.RevertDataCarrier).RevertData())
 	inputs := []error{errMsgServerSynthetic, sdkerrors.ErrUnauthorized, errMsgServerUnmapped, errors.New("internal")}
 	expected := make([]ErrorTranslation, len(inputs))
 	for i, input := range inputs {
@@ -38,7 +40,7 @@ func TestCosmosRegistryUsesCallerABI(t *testing.T) {
 	}
 	// The exported legacy ABI argument remains effective, including mismatched ABI behavior.
 	legacy := TranslateCosmosError(api, registry, errMsgServerSynthetic)
-	require.Equal(t, errorSelector(api, "AFailure"), legacy.Revert.(RevertDataCarrier).RevertData())
+	require.Equal(t, errorSelector(api, "AFailure"), legacy.Revert.(evmtypes.RevertDataCarrier).RevertData())
 	require.NotEqual(t, expected[0].Revert, legacy.Revert)
 	require.Equal(t, legacy, registry.Translate(api, errMsgServerSynthetic))
 	// A caller can still supply an incomplete ABI; the registry's
@@ -48,7 +50,7 @@ func TestCosmosRegistryUsesCallerABI(t *testing.T) {
 	require.Equal(t, expected[2].Kind, legacy.Kind)
 	require.Equal(t, expected[2].Key, legacy.Key)
 	require.True(t, legacy.IsUnmapped)
-	require.Equal(t, []byte{0x08, 0xc3, 0x79, 0xa0}, legacy.Revert.(RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, []byte{0x08, 0xc3, 0x79, 0xa0}, legacy.Revert.(evmtypes.RevertDataCarrier).RevertData()[:4])
 	require.Equal(t, legacy, registry.Translate(api, errMsgServerUnmapped))
 	resolved := registry.ResolveError(api, errMsgServerUnmapped, nil, nil)
 	require.Equal(t, legacy.Revert, resolved.Err)

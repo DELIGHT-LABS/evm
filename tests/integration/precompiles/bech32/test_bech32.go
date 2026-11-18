@@ -13,6 +13,7 @@ import (
 	"github.com/cosmos/evm/precompiles/bech32"
 	cmn "github.com/cosmos/evm/precompiles/common"
 	statedbmocks "github.com/cosmos/evm/x/vm/statedb/mocks"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
@@ -287,7 +288,7 @@ func (s *PrecompileTestSuite) TestRun() {
 				s.Require().NotNil(tc.wantErr)
 				s.Require().ErrorIs(err, vm.ErrExecutionReverted)
 				s.Require().NotNil(bz, "expected revert payload bytes")
-				var wantCarrier cmn.RevertDataCarrier
+				var wantCarrier evmtypes.RevertDataCarrier
 				s.Require().True(errors.As(tc.wantErr, &wantCarrier))
 				s.Require().Equal(wantCarrier.RevertData(), bz)
 			}

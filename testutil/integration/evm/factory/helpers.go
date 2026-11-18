@@ -7,7 +7,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
-	cmn "github.com/cosmos/evm/precompiles/common"
 	"github.com/cosmos/evm/precompiles/testutil"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 
@@ -37,8 +36,8 @@ func CheckError(err error, logCheckArgs testutil.LogCheckArgs) error {
 			return errorsmod.Wrap(err, "expected error but got none")
 		}
 
-		var gotCarrier cmn.RevertDataCarrier
-		var wantCarrier cmn.RevertDataCarrier
+		var gotCarrier evmtypes.RevertDataCarrier
+		var wantCarrier evmtypes.RevertDataCarrier
 		if !errors.As(logCheckArgs.ErrExact, &wantCarrier) {
 			return errorsmod.Wrapf(err, "expected want error to implement RevertDataCarrier; want=%T", logCheckArgs.ErrExact)
 		}

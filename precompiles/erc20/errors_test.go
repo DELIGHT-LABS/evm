@@ -10,6 +10,7 @@ import (
 	cmn "github.com/cosmos/evm/precompiles/common"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 	erc20types "github.com/cosmos/evm/x/erc20/types"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
 
@@ -56,7 +57,7 @@ func TestTranslateERC20RegisteredErrorsDirectAndWrapped(t *testing.T) {
 				fmt.Errorf("standard wrapper: %w", tc.sentinel),
 			} {
 				err := tc.translate(returned)
-				carrier := err.(cmn.RevertDataCarrier)
+				carrier := err.(evmtypes.RevertDataCarrier)
 				require.Equal(t, erc20ErrorSelector(tc.solidityError), carrier.RevertData())
 				require.NotEqual(t, erc20ErrorSelector(cmn.SolidityErrMsgServerFailed), carrier.RevertData()[:4])
 				require.NotEqual(t, erc20ErrorSelector(cmn.SolidityErrQueryFailed), carrier.RevertData()[:4])
@@ -70,13 +71,13 @@ func TestERC20UnmappedAndUnregisteredPathsRemainExplicit(t *testing.T) {
 	p := Precompile{ABI: ABI}
 
 	unmapped := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, TransferMethod, errSyntheticERC20Drift, nil).Err
-	require.Equal(t, erc20ErrorSelector(cmn.SolidityErrUnmappedCosmosError), unmapped.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, erc20ErrorSelector(cmn.SolidityErrUnmappedCosmosError), unmapped.(evmtypes.RevertDataCarrier).RevertData()[:4])
 
 	internal := errors.New("infrastructure failure")
 	msgErr := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, TransferMethod, internal, nil).Err
-	require.Equal(t, erc20ErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, erc20ErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 	queryErr := cosmosErrorRegistry.ResolveQueryError(p.ABI, ApproveMethod, internal, nil).Err
-	require.Equal(t, erc20ErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, erc20ErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func erc20ErrorSelector(name string) []byte {

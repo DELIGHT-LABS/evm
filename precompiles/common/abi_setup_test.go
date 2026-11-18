@@ -21,6 +21,7 @@ import (
 	"github.com/cosmos/evm/precompiles/slashing"
 	"github.com/cosmos/evm/precompiles/staking"
 	"github.com/cosmos/evm/precompiles/werc20"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
@@ -94,9 +95,9 @@ func TestStatefulABISetupEntrypoints(t *testing.T) {
 				require.Nil(t, args)
 				_, actual := target.execute(sdk.Context{}, nil, contract, false)
 				for _, returned := range []error{setupErr, actual} {
-					var carrier cmn.RevertDataCarrier
+					var carrier evmtypes.RevertDataCarrier
 					require.ErrorAs(t, returned, &carrier, "calldata %x", tc.input)
-					require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), carrier.RevertData())
+					require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), carrier.RevertData())
 				}
 			}
 			// Valid query/tx setup and STATICCALL keep the existing classification.

@@ -8,6 +8,8 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/stretchr/testify/require"
 
+	evmtypes "github.com/cosmos/evm/x/vm/types"
+
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
 
@@ -261,13 +263,13 @@ func TestErrorRegistrySnapshotsDeclarationsAndReturnsFreshRevertData(t *testing.
 
 	matched, revert := registry.Translate(first)
 	require.True(t, matched)
-	carrier := revert.(RevertDataCarrier)
+	carrier := revert.(evmtypes.RevertDataCarrier)
 	require.Equal(t, wantDefinition.ID[:4], carrier.RevertData()[:4])
 	carrier.RevertData()[0] ^= 0xff
 
 	matched, fresh := registry.Translate(first)
 	require.True(t, matched)
-	freshData := fresh.(RevertDataCarrier).RevertData()
+	freshData := fresh.(evmtypes.RevertDataCarrier).RevertData()
 	require.Equal(t, wantDefinition.ID[:4], freshData[:4])
 
 	matched, unknown := registry.Translate(second)

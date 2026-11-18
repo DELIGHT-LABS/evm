@@ -14,7 +14,7 @@ import (
 	evmaddress "github.com/cosmos/evm/encoding/address"
 	cmn "github.com/cosmos/evm/precompiles/common"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
-	vmtypes "github.com/cosmos/evm/x/vm/types"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	"cosmossdk.io/errors"
 	"cosmossdk.io/log/v2"
@@ -52,7 +52,7 @@ func TestDistributionQueryRegisteredErrorUsesConcreteSelector(t *testing.T) {
 		p := testDistributionPrecompile(&distributionQueryServerStub{err: returned}, nil)
 		_, err := p.ValidatorOutstandingRewards(distributionTestContext(), nil, &method, []interface{}{validator})
 		require.Error(t, err)
-		revertData := err.(cmn.RevertDataCarrier).RevertData()
+		revertData := err.(evmtypes.RevertDataCarrier).RevertData()
 		selector := revertData[:4]
 		require.Equal(t, distributionErrorSelector(SolidityErrDistributionNoValidatorExists), revertData)
 		require.NotEqual(t, distributionErrorSelector(cmn.SolidityErrQueryFailed), selector)
@@ -62,7 +62,7 @@ func TestDistributionQueryRegisteredErrorUsesConcreteSelector(t *testing.T) {
 
 func TestDistributionMsgRegisteredErrorUsesConcreteSelector(t *testing.T) {
 	caller := common.HexToAddress("0x100")
-	contract := vm.NewContract(caller, common.HexToAddress(vmtypes.DistributionPrecompileAddress), uint256.NewInt(0), 100_000, nil)
+	contract := vm.NewContract(caller, common.HexToAddress(evmtypes.DistributionPrecompileAddress), uint256.NewInt(0), 100_000, nil)
 	method := ABI.Methods[SetWithdrawAddressMethod]
 	withdrawer := sdk.AccAddress(caller.Bytes()).String()
 
@@ -73,7 +73,7 @@ func TestDistributionMsgRegisteredErrorUsesConcreteSelector(t *testing.T) {
 		p := testDistributionPrecompile(nil, &distributionMsgServerStub{err: returned})
 		_, err := p.SetWithdrawAddress(distributionTestContext(), contract, nil, &method, []interface{}{caller, withdrawer})
 		require.Error(t, err)
-		revertData := err.(cmn.RevertDataCarrier).RevertData()
+		revertData := err.(evmtypes.RevertDataCarrier).RevertData()
 		selector := revertData[:4]
 		require.Equal(t, distributionErrorSelector(SolidityErrDistributionSetWithdrawAddressDisabled), revertData)
 		require.NotEqual(t, distributionErrorSelector(cmn.SolidityErrMsgServerFailed), selector)
@@ -106,7 +106,7 @@ func TestDistributionCustomQueryServerTerminalErrors(t *testing.T) {
 
 func TestDistributionUnmappedCallSitesPreserveRevertWithoutWarning(t *testing.T) {
 	caller := common.HexToAddress("0x100")
-	contract := vm.NewContract(caller, common.HexToAddress(vmtypes.DistributionPrecompileAddress), uint256.NewInt(0), 100_000, nil)
+	contract := vm.NewContract(caller, common.HexToAddress(evmtypes.DistributionPrecompileAddress), uint256.NewInt(0), 100_000, nil)
 	queryMethod := ABI.Methods[ValidatorOutstandingRewardsMethod]
 	msgMethod := ABI.Methods[SetWithdrawAddressMethod]
 	validator := sdk.ValAddress(caller.Bytes()).String()
@@ -131,7 +131,7 @@ func TestDistributionUnmappedCallSitesPreserveRevertWithoutWarning(t *testing.T)
 				result, err := tc.call(ctx)
 				require.Nil(t, result)
 				require.Error(t, err)
-				require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), err.(cmn.RevertDataCarrier).RevertData())
+				require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), err.(evmtypes.RevertDataCarrier).RevertData())
 				require.Empty(t, output.String(), "unmapped warnings were intentionally removed")
 			})
 		}
