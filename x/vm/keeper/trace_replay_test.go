@@ -23,27 +23,60 @@ type nilNonGasUnwrapper struct{}
 func (nilNonGasUnwrapper) Error() string { return "storage error with nil cause" }
 func (nilNonGasUnwrapper) Unwrap() error { return nil }
 
-func TestIsTxGasValidationError(t *testing.T) {
+func TestPredecessorReplayError(t *testing.T) {
+	storageErr := errors.New("storage failure")
 	for _, err := range []error{core.ErrIntrinsicGas, core.ErrFloorDataGas, core.ErrGasUintOverflow} {
-		require.True(t, isTxGasValidationError(err))
-		require.True(t, isTxGasValidationError(fmt.Errorf("wrapped: %w", err)))
-		require.False(t, isTxGasValidationError(errors.Join(err, errors.New("storage failure"))))
-		require.False(t, isTxGasValidationError(fmt.Errorf("wrapped: %w", errors.Join(err, errors.New("storage failure")))))
+		require.NoError(t, predecessorReplayError(nil, err))
+		require.NoError(t, predecessorReplayError(nil, fmt.Errorf("wrapped: %w", err)))
+		joined := errors.Join(err, storageErr)
+		require.Same(t, joined, predecessorReplayError(nil, joined))
+		wrapped := fmt.Errorf("wrapped: %w", joined)
+		require.Same(t, wrapped, predecessorReplayError(nil, wrapped))
 	}
-	require.False(t, isTxGasValidationError(errors.New("storage failure")))
+	require.Same(t, storageErr, predecessorReplayError(nil, storageErr))
 
 	t.Run("nil unwrap preserves gas terminal classification", func(t *testing.T) {
 		err := nilGasUnwrapper{}
 		require.ErrorIs(t, err, core.ErrIntrinsicGas)
-		require.True(t, isTxGasValidationError(err))
-		require.True(t, isTxGasValidationError(fmt.Errorf("wrapped: %w", err)))
+		require.NoError(t, predecessorReplayError(nil, err))
+		require.NoError(t, predecessorReplayError(nil, fmt.Errorf("wrapped: %w", err)))
 	})
 
 	t.Run("nil unwrap rejects nongas terminal", func(t *testing.T) {
-		err := nilNonGasUnwrapper{}
-		require.False(t, isTxGasValidationError(err))
-		require.False(t, isTxGasValidationError(fmt.Errorf("wrapped: %w", err)))
+		err := &nilNonGasUnwrapper{}
+		require.Same(t, err, predecessorReplayError(nil, err))
+		wrapped := fmt.Errorf("wrapped: %w", err)
+		require.Same(t, wrapped, predecessorReplayError(nil, wrapped))
 	})
+
+	gasErr := fmt.Errorf("wrapped: %w", core.ErrIntrinsicGas)
+	cause := errors.New("latched failure")
+	wrappedStorage := fmt.Errorf("wrapped: %w", storageErr)
+	wrappedJoin := fmt.Errorf("wrapped: %w", errors.Join(core.ErrIntrinsicGas, storageErr))
+	for _, tc := range []struct {
+		name      string
+		candidate *txCandidateResult
+		replayErr error
+		want      error
+	}{
+		{"nil replay error", nil, nil, nil},
+		{"nil replay error ignores metadata", &txCandidateResult{cause: cause, hookFailed: true}, nil, nil},
+		{"gas without metadata", &txCandidateResult{}, gasErr, nil},
+		{"gas with cause", &txCandidateResult{cause: cause}, gasErr, cause},
+		{"gas with hook failure", &txCandidateResult{hookFailed: true}, gasErr, gasErr},
+		{"gas with cause and hook failure", &txCandidateResult{cause: cause, hookFailed: true}, gasErr, cause},
+		{"nongas precedes metadata", &txCandidateResult{cause: cause, hookFailed: true}, wrappedStorage, wrappedStorage},
+		{"joined error precedes metadata", &txCandidateResult{cause: cause, hookFailed: true}, wrappedJoin, wrappedJoin},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := predecessorReplayError(tc.candidate, tc.replayErr)
+			if tc.want == nil {
+				require.NoError(t, err)
+			} else {
+				require.Same(t, tc.want, err)
+			}
+		})
+	}
 }
 
 func TestDeferredTraceForwardsChildExit(t *testing.T) {

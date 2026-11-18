@@ -3,6 +3,7 @@ package integration
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/cosmos/evm"
 	"github.com/cosmos/evm/testutil/integration/evm/network"
@@ -343,6 +346,41 @@ func TestHistoricalPolicyTrace(t *testing.T) {
 		failure = errors.New("observer failure")
 		_, err = keeper.TraceTx(ctx, req)
 		require.ErrorContains(t, err, "observer failure")
+	})
+	t.Run("predecessor hook gas error aborts trace", func(t *testing.T) {
+		failure, hookFailure, hookGas = nil, nil, 0
+		req.TraceConfig = &vmtypes.TraceConfig{}
+		req.Predecessors = []*vmtypes.MsgEthereumTx{msg}
+		defer func() { firstHookFailure = nil; req.Predecessors = nil }()
+		for _, tc := range []struct {
+			name  string
+			cause error
+		}{
+			{"intrinsic", core.ErrIntrinsicGas},
+			{"wrapped intrinsic", fmt.Errorf("hook: %w", core.ErrIntrinsicGas)},
+			{"floor", core.ErrFloorDataGas},
+			{"wrapped floor", fmt.Errorf("hook: %w", core.ErrFloorDataGas)},
+			{"uint overflow", core.ErrGasUintOverflow},
+			{"wrapped uint overflow", fmt.Errorf("hook: %w", core.ErrGasUintOverflow)},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				firstHookFailure = tc.cause
+				infos, observed, endings = nil, nil, nil
+				traceCtx, _ := ctx.CacheContext()
+
+				response, err := keeper.TraceTx(traceCtx, req)
+
+				require.ErrorContains(t, err, tc.cause.Error())
+				require.Equal(t, codes.Internal, status.Code(err))
+				require.Nil(t, response)
+				require.Len(t, infos, 1)
+				require.Equal(t, []common.Hash{{}}, observed)
+				require.Len(t, endings, 1)
+				require.NoError(t, endings[0])
+				require.Equal(t, common.Hash{}, keeper.GetState(traceCtx, target, common.Hash{}))
+				require.Equal(t, common.Hash{}, keeper.GetState(ctx, target, common.Hash{}))
+			})
+		}
 	})
 	t.Run("trace call remains read only", func(t *testing.T) {
 		failure, infos = nil, nil

@@ -15,20 +15,33 @@ import (
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 )
 
-// isTxGasValidationError recognizes only transaction gas validation errors.
-// Do not accept a joined error, which may also contain an infrastructure error.
-func isTxGasValidationError(err error) bool {
-	for err != nil {
+// predecessorReplayError skips only gas validation failures without a cause or hook failure.
+func predecessorReplayError(candidate *txCandidateResult, replayErr error) error {
+	if replayErr == nil {
+		return nil
+	}
+	for err := replayErr; ; {
 		if _, joined := err.(evmtypes.MultiErrorUnwrapper); joined {
-			return false
+			return replayErr
 		}
 		if next := errors.Unwrap(err); next != nil {
 			err = next
 			continue
 		}
-		return errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrFloorDataGas) || errors.Is(err, core.ErrGasUintOverflow)
+		if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrFloorDataGas) || errors.Is(err, core.ErrGasUintOverflow) {
+			break
+		}
+		return replayErr
 	}
-	return false
+	if candidate != nil {
+		if candidate.cause != nil {
+			return candidate.cause
+		}
+		if candidate.hookFailed {
+			return replayErr
+		}
+	}
+	return nil
 }
 
 type deferredTraceHooks struct {

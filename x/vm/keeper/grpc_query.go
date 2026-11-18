@@ -747,13 +747,8 @@ func (k Keeper) TraceTx(c context.Context, req *types.QueryTraceTxRequest) (_ *t
 
 		ctx = buildTraceCtx(ctx, msg.GasLimit)
 		candidate, replayErr := k.runTxCandidate(ctx, txCandidateInput{msg: *msg, txType: ethTx.Type(), cfg: cfg, txConfig: txConfig})
-		if replayErr != nil {
-			if !isTxGasValidationError(replayErr) {
-				return nil, status.Error(codes.Internal, replayErr.Error())
-			}
-			if candidate != nil && candidate.cause != nil {
-				return nil, status.Error(codes.Internal, candidate.cause.Error())
-			}
+		if err := predecessorReplayError(candidate, replayErr); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
 		}
 		if candidate != nil && candidate.response != nil {
 			ctx.GasMeter().ConsumeGas(candidate.response.GasUsed, "evm predecessor tx")
