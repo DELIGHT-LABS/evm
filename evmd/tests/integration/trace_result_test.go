@@ -42,6 +42,80 @@ func (h *traceResultHooks) EstimatePostTxProcessing(ctx sdk.Context, sender comm
 	return h.PostTxProcessing(ctx, sender, msg, receipt)
 }
 
+func TestTraceFinalState(t *testing.T) {
+	nw := network.NewUnitTestNetwork(func(chainID string, evmChainID uint64, opts ...func(*baseapp.BaseApp)) evm.IntegrationNetworkApp {
+		return CreateEvmd(chainID, evmChainID, opts...)
+	})
+	keeper := nw.App.GetEVMKeeper()
+	hooks := &traceResultHooks{}
+	keeper.SetHooks(hooks)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	target := common.HexToAddress("0x1234")
+	slot := common.Hash{}
+	initial := common.HexToHash("0x3")
+
+	for _, tc := range []struct {
+		name      string
+		code      string
+		write     bool
+		gas       uint64
+		hookErr   error
+		wantValue common.Hash
+	}{
+		{"EVM write", "0x600160005500", false, 0, nil, common.HexToHash("0x1")},
+		{"hook overwrites EVM write", "0x600160005500", true, 0, nil, common.HexToHash("0x7")},
+		{"hook rejection discards writes", "0x600160005500", true, 0, traceDenial{}, initial},
+		{"hook out of gas discards writes", "0x600160005500", true, 200000, nil, initial},
+		{"reverted EVM retains hook write", "0x60005450601260005360016000fd", true, 0, nil, common.HexToHash("0x7")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _ := nw.GetContext().CacheContext()
+			state := statedb.New(ctx, keeper, statedb.NewEmptyTxConfig())
+			state.SetCode(target, common.FromHex(tc.code), tracing.CodeChangeUnspecified)
+			state.SetState(target, slot, initial)
+			require.NoError(t, state.Commit())
+			hooks.run = func(ctx sdk.Context) error {
+				if tc.write {
+					keeper.SetState(ctx, target, slot, common.HexToHash("0x7").Bytes())
+				}
+				ctx.GasMeter().ConsumeGas(tc.gas, "test post hook")
+				return tc.hookErr
+			}
+			blockTime, err := utils.SafeUint64(ctx.BlockTime().Unix())
+			require.NoError(t, err)
+			signer := ethtypes.MakeSigner(vmtypes.GetEthChainConfig(), big.NewInt(ctx.BlockHeight()), blockTime)
+			tx, err := ethtypes.SignNewTx(key, signer, &ethtypes.LegacyTx{To: &target, Gas: 200000, GasPrice: big.NewInt(0), Value: big.NewInt(0)})
+			require.NoError(t, err)
+			msg := &vmtypes.MsgEthereumTx{}
+			msg.FromEthereumTx(tx)
+			deliveryCtx, _ := ctx.CacheContext()
+			_, err = keeper.ApplyTransaction(deliveryCtx, tx)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantValue, keeper.GetState(deliveryCtx, target, slot))
+
+			response, err := keeper.TraceTx(ctx, &vmtypes.QueryTraceTxRequest{
+				Msg: msg, BlockNumber: ctx.BlockHeight(), BlockTime: ctx.BlockTime(), BlockMaxGas: 30000000,
+				TraceConfig: &vmtypes.TraceConfig{Tracer: "prestateTracer", TracerJsonConfig: `{"diffMode":true}`},
+			})
+			require.NoError(t, err)
+			var diff struct {
+				Pre  map[common.Address]struct{ Storage map[common.Hash]common.Hash }
+				Post map[common.Address]struct{ Storage map[common.Hash]common.Hash }
+			}
+			require.NoError(t, json.Unmarshal(response.Data, &diff))
+			if tc.wantValue == initial {
+				require.NotContains(t, diff.Pre, target)
+				require.NotContains(t, diff.Post, target)
+			} else {
+				require.Equal(t, initial, diff.Pre[target].Storage[slot])
+				require.Equal(t, tc.wantValue, diff.Post[target].Storage[slot])
+			}
+			require.Equal(t, initial, keeper.GetState(ctx, target, slot))
+		})
+	}
+}
+
 type traceResultRevert []byte
 
 func (traceResultRevert) Error() string        { return "post hook reverted" }
