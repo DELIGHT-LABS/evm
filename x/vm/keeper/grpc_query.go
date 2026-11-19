@@ -289,17 +289,19 @@ func (k Keeper) EthCall(c context.Context, req *types.EthCallRequest) (_ *types.
 	}
 
 	msg := args.ToMessage(cfg.BaseFee, false, false)
-	txConfig := statedb.NewEmptyTxConfig()
-	ctx, tracingHooks := k.prepareTracing(ctx, *msg, txConfig, false)
-
-	// pass false to not commit StateDB
-	stateDB := statedb.New(ctx, &k, txConfig)
-	res, err := k.ApplyMessageWithConfig(ctx, stateDB, *msg, tracingHooks, false, false, cfg, txConfig, false, overrides)
+	candidate, err := k.runTxCandidate(ctx, txCandidateInput{
+		msg:       *msg,
+		txType:    args.TxType(ethtypes.LegacyTxType),
+		cfg:       cfg,
+		txConfig:  statedb.NewEmptyTxConfig(),
+		overrides: overrides,
+		simulate:  true,
+	})
 	if err != nil {
 		return nil, rpctypes.QueryErrorWithStatus(c, codes.Internal, err)
 	}
 
-	return res, nil
+	return candidate.response, nil
 }
 
 // EstimateGas implements eth_estimateGas rpc api.
@@ -444,21 +446,6 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 				return true, nil, err
 			}
 		}
-		if !hasHooks {
-			// Each gas candidate owns a fresh tracing lifecycle.
-			tmpCtx, tracingHooks := k.prepareTracing(tmpCtx, *msg, txConfig, false)
-			// pass false to not commit StateDB
-			stateDB := statedb.New(tmpCtx, &k, txConfig)
-			rsp, err = k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, tracingHooks, false, false, cfg, txConfig, false, executionOverrides)
-			if err != nil {
-				if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrFloorDataGas) {
-					return true, nil, nil // Special case, raise gas limit
-				}
-				return true, nil, err // Bail out
-			}
-			return len(rsp.VmError) > 0, rsp, nil
-		}
-
 		candidate, candidateErr := k.runTxCandidate(tmpCtx, txCandidateInput{
 			msg:       *msg,
 			txType:    txType,
@@ -949,18 +936,29 @@ func (k Keeper) TraceCall(c context.Context, req *types.QueryTraceCallRequest) (
 	prepared.start()
 
 	deferred := deferRootTrace(prepared.tracer.Hooks)
-	ctx, hooks := k.prepareTracingWithBase(prepared.ctx, *msg, txConfig, false, deferred.hooks)
-	stateDB := statedb.New(ctx, &k, txConfig)
-	response, err := k.ApplyMessageWithConfig(ctx, stateDB, *msg, hooks, false, false, cfg, txConfig, false, overrides)
+	candidate, err := k.runTxCandidate(prepared.ctx, txCandidateInput{
+		msg:       *msg,
+		txType:    args.TxType(ethtypes.LegacyTxType),
+		cfg:       cfg,
+		txConfig:  txConfig,
+		overrides: overrides,
+		simulate:  true,
+		tracer:    deferred.hooks,
+	})
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+
 	var finalErr error
 	var output []byte
-	if response.VmError == vm.ErrExecutionReverted.Error() {
+	response := candidate.response
+	switch response.VmError {
+	case vm.ErrExecutionReverted.Error():
 		finalErr, output = vm.ErrExecutionReverted, response.Ret
+	case vm.ErrOutOfGas.Error():
+		finalErr = vm.ErrOutOfGas
 	}
-	deferred.finish(finalErr, output, nil, stateDB)
+	deferred.finish(finalErr, output, candidate.receipt, candidate.traceState)
 	result, err := prepared.result()
 	if err != nil {
 		return nil, err

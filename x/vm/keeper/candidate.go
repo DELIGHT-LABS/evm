@@ -43,6 +43,7 @@ type txCandidateResult struct {
 	outOfGas   bool
 	hookFailed bool
 	cause      error
+	traceState *statedb.StateDB
 }
 
 func (r *txCandidateResult) setChargedGas(gas uint64) {
@@ -64,7 +65,11 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	// Didn't use `Snapshot` because the context stack has exponential complexity on certain operations,
 	// thus restricted to be used only inside `ApplyMessage`.
 	candidateCtx, commitCandidate := parentCtx.CacheContext()
-	evmCtx := buildTraceCtx(candidateCtx, input.msg.GasLimit)
+	journalOnly := input.simulate && !k.HasHooks()
+	evmCtx := candidateCtx
+	if !journalOnly {
+		evmCtx = buildTraceCtx(candidateCtx, input.msg.GasLimit)
+	}
 
 	var tracingHooks *tracing.Hooks
 	if input.tracer != nil {
@@ -95,6 +100,19 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 	}
 	if response == nil {
 		return result, fmt.Errorf("EVM execution returned no response")
+	}
+	if journalOnly {
+		// No hook needs materialized SDK state. Keep the live journal for the tracer.
+		result.chargedGas = response.GasUsed
+		if input.tracer != nil {
+			result.traceState = stateDB
+		}
+		return result, nil
+	}
+
+	traceCtx := parentCtx
+	if input.simulate && input.tracer != nil {
+		defer func() { result.traceState = statedb.New(traceCtx, k, input.txConfig) }()
 	}
 	if !response.Failed() {
 		if err := stateDB.Commit(); err != nil {
@@ -172,8 +190,11 @@ func (k *Keeper) runTxCandidate(parentCtx sdk.Context, input txCandidateInput) (
 		}
 	}
 
-	if !input.simulate && !result.hookFailed {
-		commitCandidate()
+	if !result.hookFailed {
+		traceCtx = activeCtx
+		if !input.simulate {
+			commitCandidate()
+		}
 	}
 	return result, nil
 }
