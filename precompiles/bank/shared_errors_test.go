@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	cmn "github.com/cosmos/evm/precompiles/common"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
 
@@ -51,8 +52,8 @@ func TestBankSharedErrorRepresentativeMatrix(t *testing.T) {
 				require.Equal(t, expectedKey, translation.Key)
 				require.False(t, translation.IsUnmapped)
 
-				data := translation.Revert.(cmn.RevertDataCarrier).RevertData()
-				expected := cmn.NewRevertWithSolidityError(ABI, tc.solidityError).(cmn.RevertDataCarrier).RevertData()
+				data := translation.Revert.(evmtypes.RevertDataCarrier).RevertData()
+				expected := cmn.NewRevertWithSolidityError(ABI, tc.solidityError).(evmtypes.RevertDataCarrier).RevertData()
 				require.Equal(t, expected, data)
 				assertBankParsedError(t, data, tc.solidityError)
 			}
@@ -63,7 +64,7 @@ func TestBankSharedErrorRepresentativeMatrix(t *testing.T) {
 func TestBankProtocolInfrastructureAndDriftBoundaries(t *testing.T) {
 	_, protocolErr := ParseBalancesArgs(nil)
 	require.Error(t, protocolErr)
-	protocolData := protocolErr.(cmn.RevertDataCarrier).RevertData()
+	protocolData := protocolErr.(evmtypes.RevertDataCarrier).RevertData()
 	assertBankParsedError(t, protocolData, cmn.SolidityErrInvalidNumberOfArgs)
 	protocolDefinition := ABI.Errors[cmn.SolidityErrInvalidNumberOfArgs]
 	protocolArgs, err := protocolDefinition.Unpack(protocolData)
@@ -81,7 +82,7 @@ func TestBankProtocolInfrastructureAndDriftBoundaries(t *testing.T) {
 	drift := cmn.TranslateCosmosError(ABI, cosmosErrorRegistry, errSyntheticBankDrift)
 	require.Equal(t, cmn.MappingKindUnmapped, drift.Kind)
 	require.True(t, drift.IsUnmapped)
-	driftData := drift.Revert.(cmn.RevertDataCarrier).RevertData()
+	driftData := drift.Revert.(evmtypes.RevertDataCarrier).RevertData()
 	assertBankParsedError(t, driftData, cmn.SolidityErrUnmappedCosmosError)
 	driftDefinition := ABI.Errors[cmn.SolidityErrUnmappedCosmosError]
 	driftArgs, err := driftDefinition.Unpack(driftData)

@@ -15,6 +15,7 @@ import (
 
 	cmn "github.com/cosmos/evm/precompiles/common"
 	"github.com/cosmos/evm/x/vm/statedb"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/cosmos/evm/x/vm/types/mocks"
 
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
@@ -87,7 +88,7 @@ func TestBoundaryEquivalence(t *testing.T, api abi.ABI, registry *cmn.CosmosErro
 				}
 			}
 			actual := adapter(ctx, input)
-			require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), actual.(cmn.RevertDataCarrier).RevertData())
+			require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), actual.(evmtypes.RevertDataCarrier).RevertData())
 		})
 	}
 }

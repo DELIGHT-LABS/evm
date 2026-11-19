@@ -9,6 +9,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/stretchr/testify/require"
+
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 )
 
 const moduleErrorRegistryABIJSON = `[
@@ -269,7 +271,7 @@ func TestModuleErrorRegistryUsesErrorStringFallbackForInvalidArguments(t *testin
 
 			matched, revert := registry.Translate(registryValueError{Label: "invalid", Amount: big.NewInt(1)})
 			require.True(t, matched)
-			var carrier RevertDataCarrier
+			var carrier evmtypes.RevertDataCarrier
 			require.ErrorAs(t, revert, &carrier)
 			reason, err := abi.UnpackRevert(carrier.RevertData())
 			require.NoError(t, err)
@@ -299,7 +301,7 @@ func TestNewNoArgsModuleErrorMapping(t *testing.T) {
 
 	matched, revert := registry.Translate(registryErrorA{})
 	require.True(t, matched)
-	var carrier RevertDataCarrier
+	var carrier evmtypes.RevertDataCarrier
 	require.ErrorAs(t, revert, &carrier)
 	require.Equal(t, errorSelector(contractABI, "AFailure"), carrier.RevertData())
 }
@@ -461,7 +463,7 @@ func requireModuleRevert(t *testing.T, contractABI abi.ABI, revert error, errorN
 
 func requireModuleRevertDefinition(t *testing.T, definition abi.Error, revert error, want ...any) {
 	t.Helper()
-	var carrier RevertDataCarrier
+	var carrier evmtypes.RevertDataCarrier
 	require.ErrorAs(t, revert, &carrier)
 	data := carrier.RevertData()
 	require.GreaterOrEqual(t, len(data), 4)

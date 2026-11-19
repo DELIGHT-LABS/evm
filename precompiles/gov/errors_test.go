@@ -11,6 +11,7 @@ import (
 
 	cmn "github.com/cosmos/evm/precompiles/common"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
 
@@ -29,7 +30,7 @@ func TestTranslateGovRegisteredErrorsDirectAndWrapped(t *testing.T) {
 		fmt.Errorf("standard wrapper: %w", govtypes.ErrInvalidVote),
 	} {
 		translated := cosmosErrorRegistry.ResolveQueryError(p.ABI, VoteMethod, err, nil).Err
-		carrier := translated.(cmn.RevertDataCarrier)
+		carrier := translated.(evmtypes.RevertDataCarrier)
 		require.Equal(t, govErrorSelector(SolidityErrGovInvalidVote), carrier.RevertData())
 		require.NotEqual(t, govErrorSelector(cmn.SolidityErrMsgServerFailed), carrier.RevertData()[:4])
 		require.NotEqual(t, govErrorSelector(cmn.SolidityErrUnmappedCosmosError), carrier.RevertData()[:4])
@@ -40,18 +41,18 @@ func TestGovUnregisteredAndGRPCFailuresKeepLegacyFallbacks(t *testing.T) {
 	p := Precompile{ABI: ABI}
 
 	msgErr := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, DepositMethod, errors.New("infrastructure"), nil).Err
-	require.Equal(t, govErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, govErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 
 	queryErr := cosmosErrorRegistry.ResolveQueryError(p.ABI, GetProposalMethod, status.Error(codes.NotFound, "proposal missing"), nil).Err
-	require.Equal(t, govErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(cmn.RevertDataCarrier).RevertData()[:4])
-	require.NotEqual(t, govErrorSelector(SolidityErrGovInvalidProposal), queryErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, govErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
+	require.NotEqual(t, govErrorSelector(SolidityErrGovInvalidProposal), queryErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestTranslateGovUnmappedReturnsUnmappedRevert(t *testing.T) {
 	p := Precompile{ABI: ABI}
 
 	err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, DepositMethod, errSyntheticGovDrift, nil).Err
-	carrier := err.(cmn.RevertDataCarrier)
+	carrier := err.(evmtypes.RevertDataCarrier)
 	require.Equal(t, govErrorSelector(cmn.SolidityErrUnmappedCosmosError), carrier.RevertData()[:4])
 }
 

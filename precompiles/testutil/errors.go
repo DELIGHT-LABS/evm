@@ -10,7 +10,6 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
-	cmn "github.com/cosmos/evm/precompiles/common"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 )
 
@@ -44,8 +43,8 @@ func RequireExactError(t *testing.T, got error, want error) {
 	require.Error(t, got)
 	require.NotNil(t, want)
 
-	var gotCarrier cmn.RevertDataCarrier
-	var wantCarrier cmn.RevertDataCarrier
+	var gotCarrier evmtypes.RevertDataCarrier
+	var wantCarrier evmtypes.RevertDataCarrier
 	if errors.As(got, &gotCarrier) && errors.As(want, &wantCarrier) {
 		require.Equal(t, wantCarrier.RevertData(), gotCarrier.RevertData())
 		return

@@ -1713,7 +1713,7 @@ func (s *KeeperTestSuite) TestEstimateGasPostTxHookFailureClasses() {
 		{
 			name:        "ordinary error is stable",
 			hook:        &FailureHook{},
-			errContains: "failed to execute post transaction processing",
+			errContains: "EVM execution rejected: EVM hook *vm.FailureHook failed: post tx processing failed",
 		},
 		{
 			name: "hook out of gas reports allowance",
@@ -1742,10 +1742,12 @@ func (s *KeeperTestSuite) TestEstimateGasPostTxHookFailureClasses() {
 				ProposerAddress: s.Network.GetContext().BlockHeader().ProposerAddress,
 			}
 
-			_, firstErr := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), req)
-			_, secondErr := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), req)
+			first, firstErr := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), req)
+			second, secondErr := s.Network.GetEvmClient().EstimateGas(s.Network.GetContext(), req)
 			s.Require().Error(firstErr)
 			s.Require().Error(secondErr)
+			s.Require().Nil(first)
+			s.Require().Nil(second)
 			s.Require().Contains(firstErr.Error(), tc.errContains)
 			s.Require().Equal(firstErr.Error(), secondErr.Error())
 		})

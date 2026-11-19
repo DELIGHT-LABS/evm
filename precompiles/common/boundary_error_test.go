@@ -10,6 +10,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/stretchr/testify/require"
 
+	evmtypes "github.com/cosmos/evm/x/vm/types"
+
 	errorsmod "cosmossdk.io/errors"
 
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
@@ -50,7 +52,7 @@ func TestBoundaryErrorResolution(t *testing.T) {
 	require.Equal(t, errorSelector(api, msgServerSolidityErrModuleFailure), data)
 	query := cosmos.ResolveQueryError(api, "query", server(), nil)
 	require.Equal(t, MappingKindPrecompile, query.Translation.Kind)
-	require.Equal(t, errorSelector(api, "PrecompileFailure"), query.Err.(RevertDataCarrier).RevertData())
+	require.Equal(t, errorSelector(api, "PrecompileFailure"), query.Err.(evmtypes.RevertDataCarrier).RevertData())
 	// Caller ABI changes now affect both the resolver and legacy wrapper.
 	input := errors.New("internal")
 	before := cosmos.ResolveQueryError(api, "query", input, nil)
@@ -115,7 +117,7 @@ func TestResolveMsgServerErrorPreservesTerminalErrors(t *testing.T) {
 	wrapped := fmt.Errorf("outer: %w", &testRevertDataCarrier{data: revertData, err: errMsgServerSynthetic})
 	got := cosmosRegistry.ResolveMsgServerError(api, "mint", wrapped, nil).Err
 	require.Same(t, wrapped, got)
-	var carrier RevertDataCarrier
+	var carrier evmtypes.RevertDataCarrier
 	require.ErrorAs(t, got, &carrier)
 	require.Equal(t, revertData, carrier.RevertData())
 }
@@ -152,7 +154,7 @@ func TestResolveMsgServerErrorPrefersModuleMappings(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := cosmosRegistry.ResolveMsgServerError(moduleABI, "mint", tc.err, moduleRegistry.Translate).Err
-			require.Equal(t, errorSelector(moduleABI, tc.errorName), got.(RevertDataCarrier).RevertData())
+			require.Equal(t, errorSelector(moduleABI, tc.errorName), got.(evmtypes.RevertDataCarrier).RevertData())
 		})
 	}
 }
@@ -162,17 +164,17 @@ func TestResolveMsgServerErrorTranslatesCosmosErrors(t *testing.T) {
 
 	t.Run("precompile mapping", func(t *testing.T) {
 		got := cosmosRegistry.ResolveMsgServerError(moduleABI, "mint", errorsmod.Wrap(errMsgServerSynthetic, "diagnostic"), nil).Err
-		require.Equal(t, errorSelector(moduleABI, "PrecompileFailure"), got.(RevertDataCarrier).RevertData())
+		require.Equal(t, errorSelector(moduleABI, "PrecompileFailure"), got.(evmtypes.RevertDataCarrier).RevertData())
 	})
 
 	t.Run("shared SDK mapping", func(t *testing.T) {
 		got := cosmosRegistry.ResolveMsgServerError(moduleABI, "mint", errorsmod.Wrap(sdkerrors.ErrUnauthorized, "diagnostic"), nil).Err
-		require.Equal(t, errorSelector(moduleABI, SolidityErrSDKUnauthorized), got.(RevertDataCarrier).RevertData())
+		require.Equal(t, errorSelector(moduleABI, SolidityErrSDKUnauthorized), got.(evmtypes.RevertDataCarrier).RevertData())
 	})
 
 	t.Run("registered unmapped Cosmos error", func(t *testing.T) {
 		got := cosmosRegistry.ResolveMsgServerError(moduleABI, "mint", errMsgServerUnmapped, nil).Err
-		data := got.(RevertDataCarrier).RevertData()
+		data := got.(evmtypes.RevertDataCarrier).RevertData()
 		require.Equal(t, errorSelector(moduleABI, SolidityErrUnmappedCosmosError), data[:4])
 		decoded, err := moduleABI.Errors[SolidityErrUnmappedCosmosError].Inputs.Unpack(data[4:])
 		require.NoError(t, err)
@@ -195,7 +197,7 @@ func TestResolveMsgServerErrorHandlesMissingModuleMappings(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			input := errors.New("mint backend unavailable")
 			got := cosmosRegistry.ResolveMsgServerError(moduleABI, "mint", input, tc.translate).Err
-			data := got.(RevertDataCarrier).RevertData()
+			data := got.(evmtypes.RevertDataCarrier).RevertData()
 			require.Equal(t, []byte{0x23, 0x7d, 0x7e, 0xdd}, data[:4], "MsgServerFailed(string,string) selector must remain stable")
 			require.Equal(t, errorSelector(moduleABI, SolidityErrMsgServerFailed), data[:4])
 			decoded, err := moduleABI.Errors[SolidityErrMsgServerFailed].Inputs.Unpack(data[4:])
@@ -357,9 +359,9 @@ func TestBoundaryFallbackReasonDoesNotChangeClassification(t *testing.T) {
 				} else {
 					expected = NewRevertWithSolidityError(api, boundary, "operation", "public diagnostic")
 				}
-				var carrier RevertDataCarrier
+				var carrier evmtypes.RevertDataCarrier
 				require.ErrorAs(t, actual.Err, &carrier)
-				require.Equal(t, expected.(RevertDataCarrier).RevertData(), carrier.RevertData())
+				require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), carrier.RevertData())
 				require.NotContains(t, string(carrier.RevertData()), secret)
 				if tc.mapped {
 					require.Zero(t, calls)
@@ -498,12 +500,12 @@ func TestBoundaryResolversWithModuleTranslator(t *testing.T) {
 						expected := tc.translation.Revert
 						if tc.translation.Kind == MappingKindInternal {
 							expected = NewRevertWithSolidityError(api, boundary.name, operation, internal.Error())
-							data := actual.Err.(RevertDataCarrier).RevertData()
+							data := actual.Err.(evmtypes.RevertDataCarrier).RevertData()
 							decoded, err := api.Errors[boundary.name].Inputs.Unpack(data[4:])
 							require.NoError(t, err)
 							require.Equal(t, []any{operation, internal.Error()}, decoded)
 						}
-						require.Equal(t, expected.(RevertDataCarrier).RevertData(), actual.Err.(RevertDataCarrier).RevertData())
+						require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), actual.Err.(evmtypes.RevertDataCarrier).RevertData())
 						require.Equal(t, tc.translation, actual.Translation)
 						require.Equal(t, registry.ResolveError(api, tc.input, translate, fallback), actual)
 					}
@@ -513,7 +515,7 @@ func TestBoundaryResolversWithModuleTranslator(t *testing.T) {
 				caller := abi.ABI{Errors: maps.Clone(api.Errors)}
 				caller.Errors["PrecompileFailure"] = api.Errors["AFailure"]
 				mapped := boundary.resolve(caller, operation, errMsgServerSynthetic, nil)
-				require.Equal(t, errorSelector(api, "AFailure"), mapped.Err.(RevertDataCarrier).RevertData())
+				require.Equal(t, errorSelector(api, "AFailure"), mapped.Err.(evmtypes.RevertDataCarrier).RevertData())
 				input := errors.New("caller reason")
 				caller.Errors[boundary.name] = abi.NewError("CallerBoundary", api.Errors[boundary.name].Inputs)
 				actual := boundary.resolve(caller, operation, input, nil)

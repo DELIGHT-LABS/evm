@@ -14,7 +14,7 @@ import (
 
 	evmaddress "github.com/cosmos/evm/encoding/address"
 	cmn "github.com/cosmos/evm/precompiles/common"
-	vmtypes "github.com/cosmos/evm/x/vm/types"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	"cosmossdk.io/errors"
 	"cosmossdk.io/log/v2"
@@ -44,7 +44,7 @@ func (q govQueryServerStub) Proposal(context.Context, *govv1.QueryProposalReques
 
 func TestGovMsgRegisteredErrorUsesConcreteSelector(t *testing.T) {
 	caller := common.HexToAddress("0x100")
-	contract := vm.NewContract(caller, common.HexToAddress(vmtypes.GovPrecompileAddress), uint256.NewInt(0), 100_000, nil)
+	contract := vm.NewContract(caller, common.HexToAddress(evmtypes.GovPrecompileAddress), uint256.NewInt(0), 100_000, nil)
 	method := ABI.Methods[VoteMethod]
 	args := []interface{}{caller, uint64(1), uint8(govv1.OptionYes), "metadata"}
 
@@ -56,7 +56,7 @@ func TestGovMsgRegisteredErrorUsesConcreteSelector(t *testing.T) {
 		p := testGovPrecompile(&govMsgServerStub{err: returned}, nil)
 		_, err := p.Vote(govTestContext(), contract, nil, &method, args)
 		require.Error(t, err)
-		revertData := err.(cmn.RevertDataCarrier).RevertData()
+		revertData := err.(evmtypes.RevertDataCarrier).RevertData()
 		selector := revertData[:4]
 		require.Equal(t, govErrorSelector(SolidityErrGovInvalidVote), revertData)
 		require.NotEqual(t, govErrorSelector(cmn.SolidityErrMsgServerFailed), selector)
@@ -70,7 +70,7 @@ func TestGovUnlistedQueryGRPCStatusRemainsQueryFailed(t *testing.T) {
 		p := testGovPrecompile(nil, &govQueryServerStub{err: status.Error(codes.NotFound, message)})
 		_, err := p.GetProposal(govTestContext(), &method, nil, []interface{}{uint64(1)})
 		require.Error(t, err)
-		selector := err.(cmn.RevertDataCarrier).RevertData()[:4]
+		selector := err.(evmtypes.RevertDataCarrier).RevertData()[:4]
 		require.Equal(t, govErrorSelector(cmn.SolidityErrQueryFailed), selector)
 		require.NotEqual(t, govErrorSelector(SolidityErrGovInvalidProposal), selector)
 		require.NotEqual(t, govErrorSelector(cmn.SolidityErrUnmappedCosmosError), selector)

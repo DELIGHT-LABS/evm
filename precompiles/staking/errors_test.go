@@ -9,6 +9,7 @@ import (
 
 	cmn "github.com/cosmos/evm/precompiles/common"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
 
@@ -27,7 +28,7 @@ func TestTranslateStakingRegisteredErrorsDirectAndWrapped(t *testing.T) {
 		fmt.Errorf("standard wrapper: %w", stakingtypes.ErrNoValidatorFound),
 	} {
 		translated := cosmosErrorRegistry.ResolveQueryError(p.ABI, DelegateMethod, err, nil).Err
-		carrier := translated.(cmn.RevertDataCarrier)
+		carrier := translated.(evmtypes.RevertDataCarrier)
 		require.Equal(t, stakingErrorSelector(SolidityErrStakingValidatorNotFound), carrier.RevertData()[:4])
 		require.NotEqual(t, stakingErrorSelector(cmn.SolidityErrMsgServerFailed), carrier.RevertData()[:4])
 		require.NotEqual(t, stakingErrorSelector(cmn.SolidityErrUnmappedCosmosError), carrier.RevertData()[:4])
@@ -46,14 +47,14 @@ func TestStakingErrorMappingsReturnsCopyWithoutChangingRuntimeTranslation(t *tes
 
 	p := Precompile{ABI: ABI}
 	translated := cosmosErrorRegistry.ResolveQueryError(p.ABI, DelegateMethod, stakingtypes.ErrNoValidatorFound, nil).Err
-	require.Equal(t, stakingErrorSelector(SolidityErrStakingValidatorNotFound), translated.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, stakingErrorSelector(SolidityErrStakingValidatorNotFound), translated.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestTranslateStakingUnmappedReturnsUnmappedRevert(t *testing.T) {
 	p := Precompile{ABI: ABI}
 
 	err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, DelegateMethod, errSyntheticStakingDrift, nil).Err
-	carrier := err.(cmn.RevertDataCarrier)
+	carrier := err.(evmtypes.RevertDataCarrier)
 	require.Equal(t, stakingErrorSelector(cmn.SolidityErrUnmappedCosmosError), carrier.RevertData()[:4])
 }
 

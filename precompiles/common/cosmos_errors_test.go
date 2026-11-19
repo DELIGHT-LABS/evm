@@ -13,6 +13,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	evmtypes "github.com/cosmos/evm/x/vm/types"
+
 	errorsmod "cosmossdk.io/errors"
 
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
@@ -166,23 +168,23 @@ func TestTranslateCosmosError(t *testing.T) {
 	translation := TranslateCosmosError(moduleABI, registry, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "unstable text"))
 	require.Equal(t, MappingKindSharedSDK, translation.Kind)
 	require.False(t, translation.IsUnmapped)
-	require.Equal(t, errorSelector(moduleABI, "SDKUnauthorized"), translation.Revert.(RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, errorSelector(moduleABI, "SDKUnauthorized"), translation.Revert.(evmtypes.RevertDataCarrier).RevertData()[:4])
 
 	translation = TranslateCosmosError(moduleABI, registry, errPhaseOneSynthetic)
 	require.Equal(t, MappingKindPrecompile, translation.Kind)
-	require.Equal(t, errorSelector(moduleABI, "PrecompileFailure"), translation.Revert.(RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, errorSelector(moduleABI, "PrecompileFailure"), translation.Revert.(evmtypes.RevertDataCarrier).RevertData()[:4])
 
 	unmapped := errorsmod.Register("phase-one-unmapped", 8, "unmapped")
 	translation = TranslateCosmosError(moduleABI, registry, unmapped)
 	require.True(t, translation.IsUnmapped)
 	require.Equal(t, CosmosErrorKey{"phase-one-unmapped", 8}, translation.Key)
-	require.Equal(t, errorSelector(moduleABI, "UnmappedCosmosError"), translation.Revert.(RevertDataCarrier).RevertData()[:4])
-	decoded, err := moduleABI.Errors["UnmappedCosmosError"].Inputs.Unpack(translation.Revert.(RevertDataCarrier).RevertData()[4:])
+	require.Equal(t, errorSelector(moduleABI, "UnmappedCosmosError"), translation.Revert.(evmtypes.RevertDataCarrier).RevertData()[:4])
+	decoded, err := moduleABI.Errors["UnmappedCosmosError"].Inputs.Unpack(translation.Revert.(evmtypes.RevertDataCarrier).RevertData()[4:])
 	require.NoError(t, err)
 	require.Equal(t, []interface{}{"phase-one-unmapped", uint32(8)}, decoded)
-	firstRevert := translation.Revert.(RevertDataCarrier).RevertData()
+	firstRevert := translation.Revert.(evmtypes.RevertDataCarrier).RevertData()
 	repeated := TranslateCosmosError(moduleABI, registry, unmapped)
-	require.Equal(t, firstRevert, repeated.Revert.(RevertDataCarrier).RevertData())
+	require.Equal(t, firstRevert, repeated.Revert.(evmtypes.RevertDataCarrier).RevertData())
 
 	plain := errors.New("infrastructure failure")
 	translation = TranslateCosmosError(moduleABI, registry, plain)
@@ -218,25 +220,25 @@ func TestQueryError(t *testing.T) {
 		wrapped := fmt.Errorf("outer: %w", &testRevertDataCarrier{data: revertData, err: sdkerrors.ErrUnauthorized})
 		got := QueryError(moduleABI, registry, "query", wrapped)
 		require.Same(t, wrapped, got)
-		var carrier RevertDataCarrier
+		var carrier evmtypes.RevertDataCarrier
 		require.ErrorAs(t, got, &carrier)
 		require.Equal(t, revertData, carrier.RevertData())
 	})
 
 	t.Run("precompile mapping", func(t *testing.T) {
 		got := QueryError(moduleABI, registry, "query", errorsmod.Wrap(errPhaseOneSynthetic, "diagnostic"))
-		require.Equal(t, errorSelector(moduleABI, "PrecompileFailure"), got.(RevertDataCarrier).RevertData())
+		require.Equal(t, errorSelector(moduleABI, "PrecompileFailure"), got.(evmtypes.RevertDataCarrier).RevertData())
 	})
 
 	t.Run("shared SDK mapping", func(t *testing.T) {
 		got := QueryError(moduleABI, registry, "query", errorsmod.Wrap(sdkerrors.ErrUnauthorized, "diagnostic"))
-		require.Equal(t, errorSelector(moduleABI, SolidityErrSDKUnauthorized), got.(RevertDataCarrier).RevertData())
+		require.Equal(t, errorSelector(moduleABI, SolidityErrSDKUnauthorized), got.(evmtypes.RevertDataCarrier).RevertData())
 	})
 
 	t.Run("unmapped registered Cosmos error", func(t *testing.T) {
 		unmapped := errorsmod.Register("query-unmapped", 9, "unstable reason")
 		got := QueryError(moduleABI, registry, "query", unmapped)
-		data := got.(RevertDataCarrier).RevertData()
+		data := got.(evmtypes.RevertDataCarrier).RevertData()
 		require.Equal(t, errorSelector(moduleABI, SolidityErrUnmappedCosmosError), data[:4])
 		decoded, unpackErr := moduleABI.Errors[SolidityErrUnmappedCosmosError].Inputs.Unpack(data[4:])
 		require.NoError(t, unpackErr)
@@ -253,7 +255,7 @@ func TestQueryError(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := QueryError(moduleABI, registry, "query", tc.err)
-			data := got.(RevertDataCarrier).RevertData()
+			data := got.(evmtypes.RevertDataCarrier).RevertData()
 			require.Equal(t, []byte{0xeb, 0x02, 0x19, 0x65}, data[:4], "QueryFailed(string,string) selector must remain stable")
 			require.Equal(t, errorSelector(moduleABI, SolidityErrQueryFailed), data[:4])
 			decoded, unpackErr := moduleABI.Errors[SolidityErrQueryFailed].Inputs.Unpack(data[4:])
@@ -291,11 +293,11 @@ func TestCosmosErrorRegistryFreezesDeclarationInputs(t *testing.T) {
 
 	precompileTranslation := TranslateCosmosError(moduleABI, registry, errPhaseOneSynthetic)
 	require.Equal(t, MappingKindPrecompile, precompileTranslation.Kind)
-	require.Equal(t, errorSelector(moduleABI, "PrecompileFailure"), precompileTranslation.Revert.(RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, errorSelector(moduleABI, "PrecompileFailure"), precompileTranslation.Revert.(evmtypes.RevertDataCarrier).RevertData()[:4])
 
 	sharedSDKTranslation := TranslateCosmosError(moduleABI, registry, sdkerrors.ErrUnauthorized)
 	require.Equal(t, MappingKindSharedSDK, sharedSDKTranslation.Kind)
-	require.Equal(t, errorSelector(moduleABI, "SDKUnauthorized"), sharedSDKTranslation.Revert.(RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, errorSelector(moduleABI, "SDKUnauthorized"), sharedSDKTranslation.Revert.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestSharedSDKErrorMappingsReturnsCopy(t *testing.T) {
@@ -311,7 +313,7 @@ func TestSharedSDKErrorMappingsReturnsCopy(t *testing.T) {
 	registry := MustNewCosmosErrorRegistry(SharedErrorABI, nil, SharedSDKErrorMappings(), nil)
 	translation := TranslateCosmosError(SharedErrorABI, registry, sdkerrors.ErrUnauthorized)
 	require.Equal(t, MappingKindSharedSDK, translation.Kind)
-	require.Equal(t, errorSelector(SharedErrorABI, SolidityErrSDKUnauthorized), translation.Revert.(RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, errorSelector(SharedErrorABI, SolidityErrSDKUnauthorized), translation.Revert.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestApprovedOverrideDeclarationsReturnsCopy(t *testing.T) {

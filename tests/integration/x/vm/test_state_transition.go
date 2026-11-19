@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -741,6 +740,7 @@ func (s *KeeperTestSuite) TestApplyTransactionWithTxPostProcessing() {
 	s.EnableFeemarket = true
 	defer func() { s.EnableFeemarket = false }()
 
+	revertData := []byte{0xde, 0xad, 0xbe, 0xef}
 	testCases := []struct {
 		name  string
 		setup func(s *KeeperTestSuite)
@@ -802,13 +802,7 @@ func (s *KeeperTestSuite) TestApplyTransactionWithTxPostProcessing() {
 			"pass - evm tx succeeds, post processing is called but fails, the balance is unchanged",
 			func(s *KeeperTestSuite) {
 				s.Network.App.GetEVMKeeper().SetHooks(
-					keeper.NewMultiEvmHooks(
-						&testHooks{
-							postProcessing: func(ctx sdk.Context, sender common.Address, msg core.Message, receipt *gethtypes.Receipt) error {
-								return errors.New("post processing failed :(")
-							},
-						},
-					),
+					keeper.NewMultiEvmHooks(RevertHook{Data: revertData}),
 				)
 			},
 			func(s *KeeperTestSuite) {
@@ -832,6 +826,8 @@ func (s *KeeperTestSuite) TestApplyTransactionWithTxPostProcessing() {
 				res, err := s.Network.App.GetEVMKeeper().ApplyTransaction(s.Network.GetContext(), ethMsg.AsTransaction())
 				s.Require().NoError(err)
 				s.Require().True(res.Failed())
+				s.Require().Equal(vm.ErrExecutionReverted.Error(), res.VmError)
+				s.Require().Equal(revertData, res.Ret)
 
 				senderAfter := s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), s.Keyring.GetAccAddr(0), "aatom").Amount
 				recipientAfter := s.Network.App.GetBankKeeper().GetBalance(s.Network.GetContext(), s.Keyring.GetAccAddr(1), "aatom").Amount

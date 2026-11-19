@@ -9,6 +9,7 @@ import (
 
 	cmn "github.com/cosmos/evm/precompiles/common"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
 
 	errorsmod "cosmossdk.io/errors"
@@ -38,7 +39,7 @@ func TestTranslateICS02RegisteredErrorsDirectAndWrapped(t *testing.T) {
 				fmt.Errorf("standard wrapper: %w", tc.err),
 			} {
 				got := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, VerifyMembershipMethod, returned, nil).Err
-				require.Equal(t, ics02ErrorSelector(tc.name), got.(cmn.RevertDataCarrier).RevertData())
+				require.Equal(t, ics02ErrorSelector(tc.name), got.(evmtypes.RevertDataCarrier).RevertData())
 				assertICS02NotFallback(t, got)
 			}
 		})
@@ -50,17 +51,17 @@ func TestICS02UnregisteredKeeperAndQueryFailuresKeepLegacyFallbacks(t *testing.T
 	plain := errors.New("infrastructure")
 
 	msgErr := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UpdateClientMethod, plain, nil).Err
-	require.Equal(t, ics02ErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, ics02ErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 
 	queryErr := cosmosErrorRegistry.ResolveQueryError(p.ABI, GetClientStateMethod, plain, nil).Err
-	require.Equal(t, ics02ErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, ics02ErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestICS02ValidatedInputMapsPublishedError(t *testing.T) {
 	p := Precompile{ABI: ABI}
 
 	mapped := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UpdateClientMethod, clienttypes.ErrInvalidClientType, nil).Err
-	require.Equal(t, ics02ErrorSelector(SolidityErrIBCClientInvalidClientType), mapped.(cmn.RevertDataCarrier).RevertData())
+	require.Equal(t, ics02ErrorSelector(SolidityErrIBCClientInvalidClientType), mapped.(evmtypes.RevertDataCarrier).RevertData())
 	assertICS02NotFallback(t, mapped)
 }
 
@@ -74,8 +75,8 @@ func TestICS02ValidatedInputUnmappedProtocolErrorReturnsUnmappedRevert(t *testin
 
 	err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UpdateClientMethod, returned, nil).Err
 	expected := classification.Revert
-	require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), err.(cmn.RevertDataCarrier).RevertData())
-	decoded, unpackErr := ABI.Errors[cmn.SolidityErrUnmappedCosmosError].Inputs.Unpack(err.(cmn.RevertDataCarrier).RevertData()[4:])
+	require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), err.(evmtypes.RevertDataCarrier).RevertData())
+	decoded, unpackErr := ABI.Errors[cmn.SolidityErrUnmappedCosmosError].Inputs.Unpack(err.(evmtypes.RevertDataCarrier).RevertData()[4:])
 	require.NoError(t, unpackErr)
 	require.Equal(t, []any{key.Codespace, key.Code}, decoded)
 }
@@ -84,12 +85,12 @@ func TestICS02UnmappedRegisteredErrorReturnsUnmappedRevert(t *testing.T) {
 	p := Precompile{ABI: ABI}
 
 	err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, UpdateClientMethod, errSyntheticICS02Drift, nil).Err
-	require.Equal(t, ics02ErrorSelector(cmn.SolidityErrUnmappedCosmosError), err.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, ics02ErrorSelector(cmn.SolidityErrUnmappedCosmosError), err.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func assertICS02NotFallback(t *testing.T, err error) {
 	t.Helper()
-	selector := err.(cmn.RevertDataCarrier).RevertData()[:4]
+	selector := err.(evmtypes.RevertDataCarrier).RevertData()[:4]
 	require.NotEqual(t, ics02ErrorSelector(cmn.SolidityErrMsgServerFailed), selector)
 	require.NotEqual(t, ics02ErrorSelector(cmn.SolidityErrQueryFailed), selector)
 	require.NotEqual(t, ics02ErrorSelector(cmn.SolidityErrUnmappedCosmosError), selector)

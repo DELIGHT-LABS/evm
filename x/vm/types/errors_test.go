@@ -1,6 +1,8 @@
 package types_test
 
 import (
+	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -11,6 +13,84 @@ import (
 
 	"github.com/cosmos/evm/x/vm/types"
 )
+
+type testCarrier struct {
+	err  error
+	data []byte
+}
+
+func (c testCarrier) Error() string      { return "carrier error" }
+func (c testCarrier) RevertData() []byte { return c.data }
+func (c testCarrier) Unwrap() error      { return c.err }
+
+type testJoinCarrier struct {
+	errs []error
+	data []byte
+}
+
+func (c testJoinCarrier) Error() string      { return "join carrier" }
+func (c testJoinCarrier) RevertData() []byte { return c.data }
+func (c testJoinCarrier) Unwrap() []error    { return c.errs }
+
+func TestDomainRevertData(t *testing.T) {
+	data := []byte{0xde, 0xad, 0xbe, 0xef}
+	carrier := testCarrier{data: data}
+	joinCarrier := testJoinCarrier{data: data, errs: []error{errors.New("child")}}
+	child := testCarrier{data: []byte{0xca, 0xfe}}
+	testCases := []struct {
+		name string
+		err  error
+		want []byte
+		ok   bool
+	}{
+		{"non-empty carrier", carrier, data, true},
+		{"wrapped carrier", fmt.Errorf("wrapped: %w", carrier), data, true},
+		{"carrier wrapping join", testCarrier{data: data, err: errors.Join(errors.New("a"), errors.New("b"))}, data, true},
+		{"join carrier with own data", joinCarrier, data, true},
+		{"empty carrier", testCarrier{data: []byte{}}, nil, false},
+		{"empty carrier blocks child", testCarrier{data: []byte{}, err: carrier}, nil, false},
+		{"plain error", errors.New("plain error"), nil, false},
+		{"join blocks carrier children", errors.Join(carrier, carrier), nil, false},
+		{"non-empty RevertError", types.NewExecErrorWithReason(data), data, true},
+		{"empty RevertError", types.NewExecErrorWithReason([]byte{}), nil, false},
+		{"nil error", nil, nil, false},
+		{"multiple single wraps", fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", carrier)), data, true},
+		{"wrapped join blocks carrier child", fmt.Errorf("wrapped: %w", errors.Join(carrier)), nil, false},
+		{"empty join carrier blocks child", testJoinCarrier{errs: []error{carrier}}, nil, false},
+		{"own data beats child data", testCarrier{data: data, err: child}, data, true},
+		{"join own data beats child data", testJoinCarrier{data: data, errs: []error{child}}, data, true},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := types.DomainRevertData(tc.err)
+			require.Equal(t, tc.ok, ok)
+			require.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("returned data is a copy", func(t *testing.T) {
+		data := []byte{0xde, 0xad, 0xbe, 0xef}
+		got, ok := types.DomainRevertData(testCarrier{data: data})
+		require.True(t, ok)
+		require.Equal(t, data, got)
+		got[0] ^= 0xff
+		require.Equal(t, []byte{0xde, 0xad, 0xbe, 0xef}, data)
+	})
+
+	t.Run("constructor and getter copy data", func(t *testing.T) {
+		data := []byte{0xde, 0xad, 0xbe, 0xef}
+		require.Nil(t, types.NewRevertData(nil))
+		require.Nil(t, types.NewRevertData([]byte{}))
+		consCarrier := types.NewRevertData(data)
+		require.NotNil(t, consCarrier)
+		require.Equal(t, data, consCarrier.RevertData())
+		data[0] ^= 0xff
+		returned := consCarrier.RevertData()
+		require.Equal(t, []byte{0xde, 0xad, 0xbe, 0xef}, returned)
+		returned[0] ^= 0xff
+		require.Equal(t, []byte{0xde, 0xad, 0xbe, 0xef}, consCarrier.RevertData())
+	})
+}
 
 func TestNewChainIDMismatchErrorCopiesInputs(t *testing.T) {
 	expected := new(big.Int).Lsh(big.NewInt(1), 100)

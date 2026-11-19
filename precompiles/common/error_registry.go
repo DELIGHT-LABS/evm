@@ -7,6 +7,8 @@ import (
 	"reflect"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
+
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 )
 
 // ErrorMapping maps an error value, matched with errors.Is, to a Solidity
@@ -72,7 +74,7 @@ func NewErrorRegistry(api abi.ABI, mappings ...ErrorMapping) (*ErrorRegistry, er
 			return nil, fmt.Errorf("error mapping requires canonical ABI error %s", canonical.Sig)
 		}
 		encoded := NewRevertWithSolidityError(api, mapping.SolidityError)
-		var carrier RevertDataCarrier
+		var carrier evmtypes.RevertDataCarrier
 		if !errors.As(encoded, &carrier) || !bytes.Equal(carrier.RevertData(), canonical.ID[:4]) {
 			return nil, fmt.Errorf("failed to encode ABI error %s for error mapping", mapping.SolidityError)
 		}
@@ -102,7 +104,7 @@ func (registry *ErrorRegistry) Translate(err error) (matched bool, revert error)
 	}
 	for _, mapping := range registry.mappings {
 		if errors.Is(err, mapping.err) {
-			return true, &RevertWithData{data: append([]byte(nil), mapping.data...)}
+			return true, evmtypes.NewRevertData(mapping.data)
 		}
 	}
 	return false, nil

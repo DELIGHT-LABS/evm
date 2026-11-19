@@ -12,6 +12,7 @@ import (
 
 	cmn "github.com/cosmos/evm/precompiles/common"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 	transfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
 
 	"cosmossdk.io/log/v2"
@@ -84,7 +85,7 @@ func TestICS20MissingDenomSuccessMatchesUpstream(t *testing.T) {
 					require.Nil(t, bz)
 					require.Error(t, err)
 					revert := cmn.NewRevertWithSolidityError(ABI, cmn.SolidityErrQueryFailed, name, scenario.err.Error())
-					require.Equal(t, revert.(cmn.RevertDataCarrier).RevertData(), err.(cmn.RevertDataCarrier).RevertData())
+					require.Equal(t, revert.(evmtypes.RevertDataCarrier).RevertData(), err.(evmtypes.RevertDataCarrier).RevertData())
 				})
 			}
 		})
@@ -100,7 +101,7 @@ func TestICS20AmbiguousQueryStatusRemainsQueryFailed(t *testing.T) {
 	}
 	_, err := p.Denom(ctx, nil, &method, []interface{}{"00"})
 	require.Error(t, err)
-	require.Equal(t, ics20ErrorSelector(cmn.SolidityErrQueryFailed), err.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, ics20ErrorSelector(cmn.SolidityErrQueryFailed), err.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestICS20CustomQueryServerPreservesTerminalBeforeNotFound(t *testing.T) {

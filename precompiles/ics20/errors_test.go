@@ -13,6 +13,7 @@ import (
 	cmn "github.com/cosmos/evm/precompiles/common"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
 	callbackstypes "github.com/cosmos/evm/x/ibc/callbacks/types"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 	transfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
 	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
 	clienttypesv2 "github.com/cosmos/ibc-go/v11/modules/core/02-client/v2/types"
@@ -67,7 +68,7 @@ func TestTranslateICS20RegisteredErrorsDirectAndWrapped(t *testing.T) {
 				fmt.Errorf("standard wrapper: %w", tc.err),
 			} {
 				got := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, TransferMethod, returned, nil).Err
-				require.Equal(t, ics20ErrorSelector(tc.name), got.(cmn.RevertDataCarrier).RevertData())
+				require.Equal(t, ics20ErrorSelector(tc.name), got.(evmtypes.RevertDataCarrier).RevertData())
 				assertICS20NotFallback(t, got)
 			}
 		})
@@ -79,17 +80,17 @@ func TestICS20UnregisteredMsgAndQueryFailuresKeepLegacyFallbacks(t *testing.T) {
 	plain := errors.New("infrastructure")
 
 	msgErr := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, TransferMethod, plain, nil).Err
-	require.Equal(t, ics20ErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, ics20ErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 
 	queryErr := cosmosErrorRegistry.ResolveQueryError(p.ABI, DenomsMethod, plain, nil).Err
-	require.Equal(t, ics20ErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, ics20ErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestICS20ValidatedInputMapsPublishedError(t *testing.T) {
 	p := Precompile{ABI: ABI}
 
 	mapped := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, TransferMethod, transfertypes.ErrInvalidMemo, nil).Err
-	require.Equal(t, ics20ErrorSelector(SolidityErrIBCTransferInvalidMemo), mapped.(cmn.RevertDataCarrier).RevertData())
+	require.Equal(t, ics20ErrorSelector(SolidityErrIBCTransferInvalidMemo), mapped.(evmtypes.RevertDataCarrier).RevertData())
 	assertICS20NotFallback(t, mapped)
 }
 
@@ -103,8 +104,8 @@ func TestICS20ValidatedInputUnmappedProtocolErrorReturnsUnmappedRevert(t *testin
 
 	err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, TransferMethod, returned, nil).Err
 	expected := classification.Revert
-	require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), err.(cmn.RevertDataCarrier).RevertData())
-	decoded, unpackErr := ABI.Errors[cmn.SolidityErrUnmappedCosmosError].Inputs.Unpack(err.(cmn.RevertDataCarrier).RevertData()[4:])
+	require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), err.(evmtypes.RevertDataCarrier).RevertData())
+	decoded, unpackErr := ABI.Errors[cmn.SolidityErrUnmappedCosmosError].Inputs.Unpack(err.(evmtypes.RevertDataCarrier).RevertData()[4:])
 	require.NoError(t, unpackErr)
 	require.Equal(t, []any{key.Codespace, key.Code}, decoded)
 }
@@ -124,7 +125,7 @@ func TestNewMsgTransferInvalidSourcePortUsesPrecompileNativeError(t *testing.T) 
 	})
 	require.Error(t, err)
 	expected := cmn.NewRevertWithSolidityError(ABI, SolidityErrInvalidSourcePort, TransferMethod, ErrInvalidSourcePort)
-	require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), err.(cmn.RevertDataCarrier).RevertData())
+	require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), err.(evmtypes.RevertDataCarrier).RevertData())
 	assertICS20NotFallback(t, err)
 }
 
@@ -143,7 +144,7 @@ func TestNewMsgTransferInvalidSourceChannelUsesPrecompileNativeError(t *testing.
 	})
 	require.Error(t, err)
 	expected := cmn.NewRevertWithSolidityError(ABI, SolidityErrInvalidSourceChannel, TransferMethod, ErrInvalidSourceChannel)
-	require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), err.(cmn.RevertDataCarrier).RevertData())
+	require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), err.(evmtypes.RevertDataCarrier).RevertData())
 	assertICS20NotFallback(t, err)
 }
 
@@ -162,7 +163,7 @@ func TestNewMsgTransferInvalidReceiverUsesPrecompileNativeError(t *testing.T) {
 	})
 	require.Error(t, err)
 	expected := cmn.NewRevertWithSolidityError(ABI, SolidityErrInvalidReceiver, TransferMethod, "invalid receiver: ")
-	require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), err.(cmn.RevertDataCarrier).RevertData())
+	require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), err.(evmtypes.RevertDataCarrier).RevertData())
 	assertICS20NotFallback(t, err)
 }
 
@@ -180,7 +181,7 @@ func TestNewMsgTransferMapsPublishedValidationError(t *testing.T) {
 		strings.Repeat("x", transfertypes.MaximumMemoLength+1),
 	})
 	require.Error(t, err)
-	require.Equal(t, ics20ErrorSelector(SolidityErrIBCTransferInvalidMemo), err.(cmn.RevertDataCarrier).RevertData())
+	require.Equal(t, ics20ErrorSelector(SolidityErrIBCTransferInvalidMemo), err.(evmtypes.RevertDataCarrier).RevertData())
 	assertICS20NotFallback(t, err)
 }
 
@@ -188,12 +189,12 @@ func TestICS20UnmappedRegisteredErrorReturnsUnmappedRevert(t *testing.T) {
 	p := Precompile{ABI: ABI}
 
 	err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, TransferMethod, errSyntheticICS20Drift, nil).Err
-	require.Equal(t, ics20ErrorSelector(cmn.SolidityErrUnmappedCosmosError), err.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, ics20ErrorSelector(cmn.SolidityErrUnmappedCosmosError), err.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func assertICS20NotFallback(t *testing.T, err error) {
 	t.Helper()
-	selector := err.(cmn.RevertDataCarrier).RevertData()[:4]
+	selector := err.(evmtypes.RevertDataCarrier).RevertData()[:4]
 	require.NotEqual(t, ics20ErrorSelector(cmn.SolidityErrMsgServerFailed), selector)
 	require.NotEqual(t, ics20ErrorSelector(cmn.SolidityErrQueryFailed), selector)
 	require.NotEqual(t, ics20ErrorSelector(cmn.SolidityErrUnmappedCosmosError), selector)
@@ -234,9 +235,9 @@ func TestTranslateModuleErrorIdentifiers(t *testing.T) {
 	for _, input := range []error{host.ErrInvalidID, fmt.Errorf("wrapped: %w", host.ErrInvalidID)} {
 		matched, translated := translateModuleError(input)
 		require.True(t, matched)
-		require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), translated.(cmn.RevertDataCarrier).RevertData())
+		require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), translated.(evmtypes.RevertDataCarrier).RevertData())
 		resolved := cosmosErrorRegistry.ResolveMsgServerError(ABI, TransferMethod, input, translateModuleError)
-		require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), resolved.Err.(cmn.RevertDataCarrier).RevertData())
+		require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), resolved.Err.(evmtypes.RevertDataCarrier).RevertData())
 		require.Equal(t, cmn.ErrorTranslation{}, resolved.Translation)
 	}
 	for _, input := range []error{nil, errors.New("invalid identifier"), sdkerrors.ErrUnauthorized, errSyntheticICS20Drift} {
@@ -286,7 +287,7 @@ func TestTransferMessageValidationError(t *testing.T) {
 				definition := ABI.Errors[tc.want]
 				args, err := definition.Inputs.Pack()
 				require.NoError(t, err)
-				require.Equal(t, append(definition.ID[:4:4], args...), resolved.Err.(cmn.RevertDataCarrier).RevertData())
+				require.Equal(t, append(definition.ID[:4:4], args...), resolved.Err.(evmtypes.RevertDataCarrier).RevertData())
 				require.Equal(t, cmn.ErrorTranslation{}, resolved.Translation)
 			}
 		})
@@ -329,7 +330,7 @@ func TestTransferMessageValidationError(t *testing.T) {
 			require.Equal(t, wantMatched, matched)
 			require.Equal(t, wantTranslated, translated)
 			got := cosmosErrorRegistry.ResolveMsgServerError(ABI, TransferMethod, contextual, translateModuleError)
-			require.Equal(t, want.Err.(cmn.RevertDataCarrier).RevertData(), got.Err.(cmn.RevertDataCarrier).RevertData())
+			require.Equal(t, want.Err.(evmtypes.RevertDataCarrier).RevertData(), got.Err.(evmtypes.RevertDataCarrier).RevertData())
 			switch {
 			case matched:
 				require.Equal(t, cmn.ErrorTranslation{}, got.Translation)
@@ -349,7 +350,7 @@ func TestTransferMessageValidationError(t *testing.T) {
 			cosmosErrorRegistry.ResolveMsgServerError(ABI, TransferMethod, ibcerrors.ErrInvalidCoins, nil),
 			cosmosErrorRegistry.ResolveMsgServerError(ABI, TransferMethod, ibcerrors.ErrInvalidCoins, translateModuleError),
 		} {
-			require.Equal(t, append(definition.ID[:4:4], args...), resolved.Err.(cmn.RevertDataCarrier).RevertData())
+			require.Equal(t, append(definition.ID[:4:4], args...), resolved.Err.(evmtypes.RevertDataCarrier).RevertData())
 			require.True(t, resolved.Translation.IsUnmapped)
 			require.Equal(t, cmn.NewCosmosErrorKey(ibcerrors.ErrInvalidCoins), resolved.Translation.Key)
 		}

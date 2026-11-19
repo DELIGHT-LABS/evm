@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	common "github.com/cosmos/evm/precompiles/common"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
@@ -62,7 +63,7 @@ func TestTxRejectEncodingFailureAndInitialization(t *testing.T) {
 	mappings[len(mappings)-1].SolidityError = common.SolidityErrSDKUnauthorized
 	after := registry.Translate(snapshot, sdkerrors.ErrInsufficientFee)
 	require.Equal(t, common.MappingKindSharedSDK, after.Kind)
-	require.Equal(t, before.Revert.(common.RevertDataCarrier).RevertData(), after.Revert.(common.RevertDataCarrier).RevertData())
+	require.Equal(t, before.Revert.(evmtypes.RevertDataCarrier).RevertData(), after.Revert.(evmtypes.RevertDataCarrier).RevertData())
 	// The RPC-only fee mapping must not change precompile translation policy.
 	shared := common.MustNewCosmosErrorRegistry(common.SharedErrorABI, nil, common.SharedSDKErrorMappings(), nil)
 	require.Equal(t, common.MappingKindUnmapped, shared.Translate(common.SharedErrorABI, sdkerrors.ErrInsufficientFee).Kind)

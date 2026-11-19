@@ -19,7 +19,7 @@ import (
 	evmaddress "github.com/cosmos/evm/encoding/address"
 	cmn "github.com/cosmos/evm/precompiles/common"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
-	vmtypes "github.com/cosmos/evm/x/vm/types"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	"cosmossdk.io/log/v2"
 
@@ -80,7 +80,7 @@ func TestQueryMissingRecordSuccessMatchesUpstream(t *testing.T) {
 	validator := sdk.ValAddress(caller.Bytes()).String()
 	delegator, err := evmaddress.NewEvmCodec("cosmos").BytesToString(caller.Bytes())
 	require.NoError(t, err)
-	contract := vm.NewContract(caller, common.HexToAddress(vmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
+	contract := vm.NewContract(caller, common.HexToAddress(evmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
 
 	tests := []struct {
 		name    string
@@ -156,7 +156,7 @@ func TestQueryMissingRecordSuccessMatchesUpstream(t *testing.T) {
 					require.Nil(t, got)
 					require.Error(t, err)
 					revert := cmn.NewRevertWithSolidityError(ABI, cmn.SolidityErrQueryFailed, tc.method, scenario.err.Error())
-					require.Equal(t, revert.(cmn.RevertDataCarrier).RevertData(), err.(cmn.RevertDataCarrier).RevertData())
+					require.Equal(t, revert.(evmtypes.RevertDataCarrier).RevertData(), err.(evmtypes.RevertDataCarrier).RevertData())
 				})
 			}
 			// Approved terminal preservation still precedes even a matching message.
@@ -178,32 +178,32 @@ func TestAmbiguousQueryStatusRemainsQueryFailed(t *testing.T) {
 	method := methodPointer(DelegationMethod)
 	_, err := p.Delegation(testContext(), nil, method, []interface{}{caller, validator})
 	require.Error(t, err)
-	require.Equal(t, stakingErrorSelector(cmn.SolidityErrQueryFailed), err.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, stakingErrorSelector(cmn.SolidityErrQueryFailed), err.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestCancelUnbondingNotFoundExactSelectorIndependentOfMessage(t *testing.T) {
 	caller := common.HexToAddress("0x100")
 	validator := sdk.ValAddress(caller.Bytes()).String()
-	contract := vm.NewContract(caller, common.HexToAddress(vmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
+	contract := vm.NewContract(caller, common.HexToAddress(evmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
 	args := []interface{}{caller, validator, big.NewInt(1), big.NewInt(1)}
 
 	for _, message := range []string{"not found", "transport text changed"} {
 		p := testStakingPrecompile(nil, &msgServerStub{err: status.Error(codes.NotFound, message)})
 		_, err := p.CancelUnbondingDelegation(testContext(), contract, nil, methodPointer(CancelUnbondingDelegationMethod), args)
 		require.Error(t, err)
-		require.Equal(t, []byte{0x46, 0x41, 0xdb, 0x46}, err.(cmn.RevertDataCarrier).RevertData())
+		require.Equal(t, []byte{0x46, 0x41, 0xdb, 0x46}, err.(evmtypes.RevertDataCarrier).RevertData())
 	}
 
 	p := testStakingPrecompile(nil, &msgServerStub{err: sdkerrors.ErrNotFound.Wrap("registered text changed")})
 	_, err := p.CancelUnbondingDelegation(testContext(), contract, nil, methodPointer(CancelUnbondingDelegationMethod), args)
 	require.Error(t, err)
-	require.Equal(t, []byte{0x76, 0x58, 0x16, 0xdd}, err.(cmn.RevertDataCarrier).RevertData())
+	require.Equal(t, []byte{0x76, 0x58, 0x16, 0xdd}, err.(evmtypes.RevertDataCarrier).RevertData())
 }
 
 func TestCancelUnbondingRegisteredSentinelIsNotGRPCDisposition(t *testing.T) {
 	caller := common.HexToAddress("0x100")
 	validator := sdk.ValAddress(caller.Bytes()).String()
-	contract := vm.NewContract(caller, common.HexToAddress(vmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
+	contract := vm.NewContract(caller, common.HexToAddress(evmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
 	args := []interface{}{caller, validator, big.NewInt(1), big.NewInt(1)}
 
 	for _, returned := range []error{
@@ -214,20 +214,20 @@ func TestCancelUnbondingRegisteredSentinelIsNotGRPCDisposition(t *testing.T) {
 		_, err := p.CancelUnbondingDelegation(testContext(), contract, nil, methodPointer(CancelUnbondingDelegationMethod), args)
 		require.Error(t, err)
 		expected := cmn.NewRevertWithSolidityError(ABI, cmn.SolidityErrUnmappedCosmosError, stakingtypes.ModuleName, uint32(26))
-		require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), err.(cmn.RevertDataCarrier).RevertData())
-		require.NotEqual(t, []byte{0x46, 0x41, 0xdb, 0x46}, err.(cmn.RevertDataCarrier).RevertData()[:4])
+		require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), err.(evmtypes.RevertDataCarrier).RevertData())
+		require.NotEqual(t, []byte{0x46, 0x41, 0xdb, 0x46}, err.(evmtypes.RevertDataCarrier).RevertData()[:4])
 	}
 }
 
 func TestDelegateRegisteredErrorUsesConcreteSelector(t *testing.T) {
 	caller := common.HexToAddress("0x100")
 	validator := sdk.ValAddress(caller.Bytes()).String()
-	contract := vm.NewContract(caller, common.HexToAddress(vmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
+	contract := vm.NewContract(caller, common.HexToAddress(evmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
 	for _, returned := range []error{stakingtypes.ErrNoValidatorFound, fmt.Errorf("outer: %w", stakingtypes.ErrNoValidatorFound)} {
 		p := testStakingPrecompile(nil, &msgServerStub{err: returned})
 		_, err := p.Delegate(testContext(), contract, nil, methodPointer(DelegateMethod), []interface{}{caller, validator, big.NewInt(1)})
 		require.Error(t, err)
-		require.Equal(t, stakingErrorSelector(SolidityErrStakingValidatorNotFound), err.(cmn.RevertDataCarrier).RevertData())
+		require.Equal(t, stakingErrorSelector(SolidityErrStakingValidatorNotFound), err.(evmtypes.RevertDataCarrier).RevertData())
 	}
 }
 
@@ -258,7 +258,7 @@ func testContext() sdk.Context {
 func TestStakingCustomServerTerminalBeforeGRPC(t *testing.T) {
 	caller := common.HexToAddress("0x100")
 	validator := sdk.ValAddress(caller.Bytes()).String()
-	contract := vm.NewContract(caller, common.HexToAddress(vmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
+	contract := vm.NewContract(caller, common.HexToAddress(evmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
 	for _, input := range []error{
 		precompiletest.StatusRevert{},
 		precompiletest.StatusOutOfGas{},
@@ -278,7 +278,7 @@ func TestStakingCustomServerTerminalBeforeGRPC(t *testing.T) {
 func TestStakingMsgGRPCPolicyScope(t *testing.T) {
 	caller := common.HexToAddress("0x100")
 	validator := sdk.ValAddress(caller.Bytes()).String()
-	contract := vm.NewContract(caller, common.HexToAddress(vmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
+	contract := vm.NewContract(caller, common.HexToAddress(evmtypes.StakingPrecompileAddress), uint256.NewInt(0), 100_000, nil)
 	for _, tc := range []struct {
 		name   string
 		method string
@@ -300,7 +300,7 @@ func TestStakingMsgGRPCPolicyScope(t *testing.T) {
 			}
 			expected := cmn.NewRevertWithSolidityError(ABI, cmn.SolidityErrMsgServerFailed, tc.method, tc.err.Error())
 			require.Error(t, actual)
-			require.Equal(t, expected.(cmn.RevertDataCarrier).RevertData(), actual.(cmn.RevertDataCarrier).RevertData())
+			require.Equal(t, expected.(evmtypes.RevertDataCarrier).RevertData(), actual.(evmtypes.RevertDataCarrier).RevertData())
 		})
 	}
 }

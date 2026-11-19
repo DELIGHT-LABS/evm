@@ -10,25 +10,6 @@ import (
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 )
 
-// RevertDataCarrier is an error that carries ABI-encoded revert data.
-type RevertDataCarrier interface {
-	error
-	RevertData() []byte
-}
-
-// RevertWithData carries ABI-encoded custom error data.
-type RevertWithData struct {
-	data []byte
-}
-
-func (e *RevertWithData) Error() string {
-	return vm.ErrExecutionReverted.Error()
-}
-
-func (e *RevertWithData) RevertData() []byte {
-	return e.data
-}
-
 // NewRevertWithSolidityError packs args using the provided module ABI's error definition.
 // It avoids hardcoding ABI information in Go by relying on the Solidity-generated ABI.
 func NewRevertWithSolidityError(moduleABI abi.ABI, errorName string, args ...interface{}) error {
@@ -39,7 +20,7 @@ func NewRevertWithSolidityError(moduleABI abi.ABI, errorName string, args ...int
 		if encErr != nil {
 			return errors.New(reason)
 		}
-		return &RevertWithData{data: revertReasonBz}
+		return evmtypes.NewRevertData(revertReasonBz)
 	}
 
 	data, err := customErr.Inputs.Pack(args...)
@@ -49,16 +30,16 @@ func NewRevertWithSolidityError(moduleABI abi.ABI, errorName string, args ...int
 		if encErr != nil {
 			return errors.New(reason)
 		}
-		return &RevertWithData{data: revertReasonBz}
+		return evmtypes.NewRevertData(revertReasonBz)
 	}
-	return &RevertWithData{data: append(customErr.ID[:4], data...)}
+	return evmtypes.NewRevertData(append(customErr.ID[:4], data...))
 }
 
 // ReturnRevertError maps precompile failures to vm.ErrExecutionReverted, sets interpreter
 // return data when possible, and returns the same revert bytes as the call result (for opCall).
 // See https://github.com/cosmos/evm/issues/223
 func ReturnRevertError(evm *vm.EVM, err error) ([]byte, error) {
-	var carrier RevertDataCarrier
+	var carrier evmtypes.RevertDataCarrier
 	if errors.As(err, &carrier) {
 		data := carrier.RevertData()
 		evm.SetReturnData(data)

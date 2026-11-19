@@ -11,6 +11,7 @@ import (
 
 	cmn "github.com/cosmos/evm/precompiles/common"
 	precompiletest "github.com/cosmos/evm/precompiles/testutil"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 
 	errorsmod "cosmossdk.io/errors"
 
@@ -38,7 +39,7 @@ func TestTranslateDistributionRegisteredErrorsDirectAndWrapped(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		translated := cosmosErrorRegistry.ResolveQueryError(p.ABI, DelegationRewardsMethod, tc.err, nil).Err
-		carrier := translated.(cmn.RevertDataCarrier)
+		carrier := translated.(evmtypes.RevertDataCarrier)
 		require.Equal(t, distributionErrorSelector(tc.expected), carrier.RevertData())
 		require.NotEqual(t, distributionErrorSelector(cmn.SolidityErrQueryFailed), carrier.RevertData()[:4])
 		require.NotEqual(t, distributionErrorSelector(cmn.SolidityErrUnmappedCosmosError), carrier.RevertData()[:4])
@@ -49,18 +50,18 @@ func TestDistributionUnregisteredAndGRPCFailuresKeepLegacyFallbacks(t *testing.T
 	p := Precompile{ABI: ABI}
 
 	msgErr := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, FundCommunityPoolMethod, errors.New("infrastructure"), nil).Err
-	require.Equal(t, distributionErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, distributionErrorSelector(cmn.SolidityErrMsgServerFailed), msgErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 
 	queryErr := cosmosErrorRegistry.ResolveQueryError(p.ABI, ValidatorCommissionMethod, status.Error(codes.NotFound, "message changed"), nil).Err
-	require.Equal(t, distributionErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(cmn.RevertDataCarrier).RevertData()[:4])
-	require.NotEqual(t, distributionErrorSelector(SolidityErrDistributionNoValidatorExists), queryErr.(cmn.RevertDataCarrier).RevertData()[:4])
+	require.Equal(t, distributionErrorSelector(cmn.SolidityErrQueryFailed), queryErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
+	require.NotEqual(t, distributionErrorSelector(SolidityErrDistributionNoValidatorExists), queryErr.(evmtypes.RevertDataCarrier).RevertData()[:4])
 }
 
 func TestTranslateDistributionUnmappedReturnsUnmappedRevert(t *testing.T) {
 	p := Precompile{ABI: ABI}
 
 	err := cosmosErrorRegistry.ResolveMsgServerError(p.ABI, FundCommunityPoolMethod, errSyntheticDistributionDrift, nil).Err
-	carrier := err.(cmn.RevertDataCarrier)
+	carrier := err.(evmtypes.RevertDataCarrier)
 	require.Equal(t, distributionErrorSelector(cmn.SolidityErrUnmappedCosmosError), carrier.RevertData()[:4])
 }
 
